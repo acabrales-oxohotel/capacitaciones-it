@@ -95,13 +95,15 @@ function renderBloque(b, ctx) {
 function renderBloques(bloques, ctx) {
   ctx = ctx || {};
   let h = '', n = 0;
+  // b._u (solo en la vista previa del editor) marca el elemento para sincronizar el desplazamiento con el bloque del editor.
+  const marca = function (html, b) { return b._u && html ? html.replace(/^<(\w+)/, '<$1 data-b="' + b._u + '"') : html; };
   (bloques || []).forEach(function (b) {
     if (b.tipo === 'titulo') n = 0;
     if (b.tipo === 'paso') {
       n++;
-      h += '<div class="paso"><div class="num">' + n + '</div><div class="cont"><div class="txt">' + md(b.contenido) + '</div>' +
-        (b.hijos || []).map(function (x) { return renderBloque(x, ctx); }).join('') + '</div></div>';
-    } else h += renderBloque(b, ctx);
+      h += marca('<div class="paso"><div class="num">' + n + '</div><div class="cont"><div class="txt">' + md(b.contenido) + '</div>' +
+        (b.hijos || []).map(function (x) { return renderBloque(x, ctx); }).join('') + '</div></div>', b);
+    } else h += marca(renderBloque(b, ctx), b);
   });
   return h;
 }

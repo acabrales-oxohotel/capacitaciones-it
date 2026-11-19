@@ -78,6 +78,7 @@ function pintarEditor(v) {
     '<div class="ed-cols ' + (E.prev ? '' : 'sin-prev') + '" id="ed-cols"><div id="ed-izq"></div><div class="ed-prev"><div class="etq" style="margin-bottom:8px">Vista previa</div><div class="cuerpo-art" id="ed-vista"></div></div></div></div>';
   pintarEditorIzq();
   actualizarVista();
+  sincEnganchar();
   $('#ed-guardar').onclick = guardarEditor;
   $('#ed-cancelar').onclick = function () { ir(E.id ? '#/a/' + encodeURIComponent((S.articulos.find(function (a) { return a.id === E.id; }) || {}).slug) : '#/'); };
   $('#ed-prev-btn').onclick = function () { E.prev = !E.prev; $('#ed-cols').classList.toggle('sin-prev', !E.prev); };
@@ -193,8 +194,56 @@ function actualizarVistaDeb() { clearTimeout(_tp); _tp = setTimeout(actualizarVi
 function actualizarVista() {
   const cont = $('#ed-vista'); if (!cont) return;
   const ctx = { artId: E.id || 'nuevo', toc: [] };
-  cont.innerHTML = '<h1 style="font-size:1.5rem;margin-bottom:8px">' + esc(E.meta.titulo || 'Sin título') + '</h1>' + (E.meta.resumen ? '<p class="art-resumen" style="font-size:.95rem">' + esc(E.meta.resumen) + '</p>' : '') + renderBloques(limpiar(E.bloques), ctx);
+  cont.innerHTML = '<h1 style="font-size:1.5rem;margin-bottom:8px">' + esc(E.meta.titulo || 'Sin título') + '</h1>' + (E.meta.resumen ? '<p class="art-resumen" style="font-size:.95rem">' + esc(E.meta.resumen) + '</p>' : '') + renderBloques(conMarca(E.bloques), ctx);
   cargarImagenes(cont);
+  sincEditorAVista();
+}
+
+/* ── Desplazamiento sincronizado: editor ↔ vista previa (por bloque, con la posición relativa dentro de cada uno) ── */
+function conMarca(lista) { return lista.map(function (b) { return { _u: b.uid, tipo: b.tipo, contenido: b.contenido, config: b.config, hijos: limpiar(b.hijos || []) }; }); }
+const SINC = { hasta: 0, raf: 0 };
+const SINC_REF = 150;   // línea de referencia (px desde el borde superior de la ventana) bajo la cabecera y la barra del editor
+const SINC_PREV = 24;   // línea de referencia dentro de la vista previa
+function sincActiva() { return $('#ed-vista') && E.prev && window.innerWidth > 1180; }
+
+function sincEditorAVista() {
+  if (!sincActiva()) return;
+  const prev = $('.ed-prev'), bls = $$('#ed-bloques > .bl');
+  if (!bls.length) return;
+  let cur = null, f = 0;
+  for (let i = 0; i < bls.length; i++) {
+    const r = bls[i].getBoundingClientRect();
+    if (r.top <= SINC_REF) { cur = bls[i]; f = Math.min(1, Math.max(0, (SINC_REF - r.top) / Math.max(1, r.height))); } else break;
+  }
+  SINC.hasta = Date.now() + 140;
+  if (!cur) { prev.scrollTop = 0; return; }
+  const t = $('#ed-vista [data-b="' + cur.dataset.uid + '"]'); if (!t) return;
+  const pr = prev.getBoundingClientRect(), tr = t.getBoundingClientRect();
+  prev.scrollTop = prev.scrollTop + (tr.top - pr.top) + f * tr.height - SINC_PREV;
+}
+
+function sincVistaAEditor() {
+  if (!sincActiva()) return;
+  const prev = $('.ed-prev'), els = $$('#ed-vista [data-b]');
+  if (!els.length) return;
+  const pr = prev.getBoundingClientRect();
+  let cur = null, f = 0;
+  for (let i = 0; i < els.length; i++) {
+    const r = els[i].getBoundingClientRect();
+    if (r.top - pr.top <= SINC_PREV + 1) { cur = els[i]; f = Math.min(1, Math.max(0, (pr.top + SINC_PREV - r.top) / Math.max(1, r.height))); } else break;
+  }
+  SINC.hasta = Date.now() + 140;
+  if (!cur) return;
+  const e = $('#ed-bloques > .bl[data-uid="' + cur.dataset.b + '"]'); if (!e) return;
+  const er = e.getBoundingClientRect();
+  window.scrollTo(0, window.scrollY + er.top - SINC_REF + f * er.height);
+}
+
+function sincEnganchar() {
+  if (window.__sincListo) return; window.__sincListo = true;
+  const cola = function (fn) { if (Date.now() < SINC.hasta || SINC.raf) return; SINC.raf = setTimeout(function () { SINC.raf = 0; fn(); }, 16); };
+  window.addEventListener('scroll', function () { cola(sincEditorAVista); }, { passive: true });
+  document.addEventListener('scroll', function (e) { if (e.target && e.target.classList && e.target.classList.contains('ed-prev')) cola(sincVistaAEditor); }, { capture: true, passive: true });
 }
 
 /* ── Imágenes y adjuntos ── */
