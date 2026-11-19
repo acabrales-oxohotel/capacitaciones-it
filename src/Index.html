@@ -1,39 +1,46 @@
 <!DOCTYPE html>
-<html lang="es" data-tema="claro">
+<html lang="es" data-tema="oscuro">
 <head>
-  <base target="_top">
+  <!-- Sin <base target="_top">: los enlaces internos (#/…) deben quedarse dentro del marco de Apps Script; los externos llevan target="_blank". -->
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0f1519">
   <title>OxoPedia · Conocimiento de TI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
   <?!= include_('Estilos') ?>
-  <script>try { document.documentElement.dataset.tema = localStorage.getItem('oxopedia-tema') || 'claro'; } catch (e) { /* tema por defecto */ }</script>
+  <script>try { document.documentElement.dataset.tema = localStorage.getItem('oxopedia-tema') || 'oscuro'; } catch (e) { /* tema por defecto */ }</script>
 </head>
 <body>
-  <header class="top" id="top" hidden>
-    <button class="btn-ico" id="btn-menu" aria-label="Abrir menú"><i class="ph ph-list"></i></button>
-    <a class="marca" href="#/" id="marca"><span id="marca-txt">OXO<span class="sub">PEDIA</span></span></a>
-    <div class="buscador" id="buscador">
-      <i class="ph ph-magnifying-glass"></i>
-      <input id="q" type="search" placeholder="Buscar en OxoPedia…" autocomplete="off" aria-label="Buscar">
-      <kbd>/</kbd>
-      <div class="sugerencias" id="sugerencias" hidden></div>
+  <div id="progreso" aria-hidden="true"></div>
+  <div class="app" id="app">
+    <aside class="lateral" id="side" aria-label="Navegación">
+      <a class="marca" href="#/" id="marca" aria-label="OxoPedia · inicio">
+        <svg class="logo" viewBox="0 0 512 512" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e0b94a"/><stop offset="1" stop-color="#b58a1c"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="url(#lg)"/><path d="M248 186C205 158 150 154 104 168V362C150 348 205 352 248 380Z" fill="#1f2a31"/><path d="M264 186C307 158 362 154 408 168V362C362 348 307 352 264 380Z" fill="#1f2a31"/><path d="M388 70l13 36 36 13-36 13-13 36-13-36-36-13 36-13z" fill="#fbf3dc"/></svg>
+        <span class="wm"><span class="n"><b>oxo</b><i>pedia</i></span><small>Conocimiento de TI</small></span>
+      </a>
+      <nav class="side" id="nav" aria-label="Secciones"></nav>
+      <div class="lateral-pie"><span>OxoHotel · TI</span><span id="ver"></span></div>
+    </aside>
+    <div class="velo-lat" id="velo-lat"></div>
+
+    <div class="principal">
+      <header class="top" id="top">
+        <button class="btn-ico" id="btn-menu" aria-label="Abrir menú"><i class="ph ph-list"></i></button>
+        <div class="buscador" id="buscador">
+          <i class="ph ph-magnifying-glass"></i>
+          <input id="q" type="search" placeholder="Buscar en OxoPedia…" autocomplete="off" aria-label="Buscar">
+          <kbd>/</kbd>
+          <div class="sugerencias" id="sugerencias" hidden></div>
+        </div>
+        <button class="btn-ico" id="btn-tema" aria-label="Cambiar tema" title="Tema claro / oscuro"><i class="ph ph-moon"></i></button>
+        <div class="yo" id="yo"><span class="esq" style="width:32px;height:32px;border-radius:50%"></span><span class="esq" style="width:90px;height:12px"></span></div>
+      </header>
+      <main class="main"><div class="pagina" id="vista"></div></main>
     </div>
-    <button class="btn-ico" id="btn-tema" aria-label="Cambiar tema" title="Tema claro / oscuro"><i class="ph ph-moon"></i></button>
-    <div class="yo" id="yo"></div>
-  </header>
-
-  <div class="shell" id="shell" hidden>
-    <nav class="side" id="side" aria-label="Secciones"></nav>
-    <main class="main"><div class="pagina" id="vista"></div></main>
-  </div>
-
-  <div id="cargando-app" style="min-height:100vh;display:grid;place-items:center;color:#49677a;font:600 .8rem Montserrat,Arial;letter-spacing:.22em;text-transform:uppercase">
-    Cargando OxoPedia…
   </div>
   <div id="modales"></div>
   <div class="toasts" id="toasts" aria-live="polite"></div>

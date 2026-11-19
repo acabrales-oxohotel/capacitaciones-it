@@ -10,7 +10,8 @@ const DEFECTOS = {
   SHEET_ID: '1TMcYYHnbHqsGq_lYOyvF5mpMq1HnXDUQwGg_d_MvMPo',
   CARPETA_ID: '1t2T24QF832VgGZcejw0of9jjEzup_kUV',
   GITHUB_REPO: 'acabrales-oxohotel/capacitaciones-it',
-  GITHUB_RAMA: 'main'
+  GITHUB_RAMA: 'main',
+  FAVICON_URL: 'https://acabrales-oxohotel.github.io/capacitaciones-it/assets/favicon.png'
 };
 
 const ROLES = { ADMIN: 'Administrador', LECTOR: 'Lector' };

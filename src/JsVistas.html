@@ -121,10 +121,10 @@ function vistaInicio(v) {
     '<p>Procedimientos de soporte y desarrollo, de punta a punta. Úsalo para capacitarte o como manual de consulta diaria.</p>' +
     '<div class="buscador-grande"><i class="ph ph-magnifying-glass"></i><input id="q-home" type="search" placeholder="Busca un procedimiento, herramienta o error…" autocomplete="off"></div></section>';
   h += '<div class="kpis">' +
-    '<div class="kpi"><div class="n">' + total + '</div><div class="l">Artículos</div></div>' +
-    '<div class="kpi verde"><div class="n">' + pct + '<sup>%</sup></div><div class="l">Validados (' + val + ')</div></div>' +
-    '<div class="kpi"><div class="n">' + cuenta('En revisión') + '</div><div class="l">En revisión</div></div>' +
-    '<div class="kpi oro"><div class="n">' + cuenta('Borrador') + '</div><div class="l">Borradores</div></div></div>';
+    '<div class="kpi"><div class="n" data-n="' + total + '">0</div><div class="l"><i class="ph ph-files"></i>Artículos</div></div>' +
+    '<div class="kpi verde"><div class="n" data-n="' + pct + '">0<sup>%</sup></div><div class="l"><i class="ph ph-seal-check"></i>Validados (' + val + ')</div></div>' +
+    '<div class="kpi"><div class="n" data-n="' + cuenta('En revisión') + '">0</div><div class="l"><i class="ph ph-magnifying-glass"></i>En revisión</div></div>' +
+    '<div class="kpi oro"><div class="n" data-n="' + cuenta('Borrador') + '">0</div><div class="l"><i class="ph ph-pencil-simple-line"></i>Borradores</div></div></div>';
 
   h += '<div class="sec-t"><h2>Accesos rápidos</h2>' + (esAdmin() ? '<a class="btn btn-t btn-chico" href="#/admin/secciones"><i class="ph ph-plus"></i> Gestionar secciones</a>' : '') + '</div><div class="grid-sec">';
   raices().forEach(function (s) {
@@ -143,6 +143,7 @@ function vistaInicio(v) {
       vencidos.map(function (a) { return itemLista(a, 'revisado ' + fechaCorta(a.fecha_revision)); }).join('') + '</div>';
   }
   v.innerHTML = h;
+  animarNumeros(v);
   const qh = $('#q-home', v);
   qh.addEventListener('keydown', function (e) { if (e.key === 'Enter' && qh.value.trim()) ir('#/buscar?q=' + encodeURIComponent(qh.value.trim())); });
 }
@@ -176,7 +177,7 @@ function vistaSeccion(v, slug) {
 
 /* ───────── Artículo ───────── */
 function vistaArtEsqueleto(v) {
-  v.innerHTML = '<div class="esq" style="height:14px;width:240px;margin-bottom:22px"></div><div class="esq" style="height:38px;width:70%;margin-bottom:16px"></div><div class="esq" style="height:80px;margin-bottom:20px"></div><div class="esq" style="height:340px"></div>';
+  v.innerHTML = esqArticulo();
 }
 
 async function vistaArticulo(v, slug) {

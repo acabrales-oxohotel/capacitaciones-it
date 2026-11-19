@@ -9,10 +9,13 @@ function doGet(e) {
   const t = HtmlService.createTemplateFromFile('Index');
   t.version = APP.VERSION;
   t.rutaInicial = p.a ? '#/a/' + encodeURIComponent(p.a) : (p.s ? '#/s/' + encodeURIComponent(p.s) : '');
-  return t.evaluate()
+  const salida = t.evaluate()
     .setTitle(APP.NOMBRE + ' · Conocimiento de TI')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+  // Favicon (pestaña del navegador): URL pública con el icono. Se puede cambiar con la propiedad de script FAVICON_URL.
+  try { salida.setFaviconUrl(prop_('FAVICON_URL') || DEFECTOS.FAVICON_URL); } catch (err) { /* sin favicon */ }
+  return salida;
 }
 
 function include_(nombre) {

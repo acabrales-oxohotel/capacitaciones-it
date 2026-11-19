@@ -10,11 +10,14 @@ const norm = function (s) { return String(s || '').normalize('NFD').replace(/[̀
 const esAdmin = function () { return S.user && S.user.rol === 'Administrador'; };
 
 /** Llamada al servidor (google.script.run) como promesa. */
+let _cargas = 0;
+function progreso(delta) { _cargas = Math.max(0, _cargas + delta); const b = $('#progreso'); if (b) b.classList.toggle('on', _cargas > 0); }
 function api(accion, payload) {
+  progreso(1);
   return new Promise(function (resolve, reject) {
     google.script.run
-      .withSuccessHandler(function (r) { if (r && r.ok) resolve(r.data); else reject(new Error((r && r.error) || 'Error desconocido')); })
-      .withFailureHandler(function (e) { reject(new Error((e && e.message) || 'No hay conexión con el servidor')); })
+      .withSuccessHandler(function (r) { progreso(-1); if (r && r.ok) resolve(r.data); else reject(new Error((r && r.error) || 'Error desconocido')); })
+      .withFailureHandler(function (e) { progreso(-1); reject(new Error((e && e.message) || 'No hay conexión con el servidor')); })
       .api(accion, payload || {});
   });
 }
@@ -75,7 +78,7 @@ function toast(msg, tipo) {
   el.className = 'toast ' + (tipo || '');
   el.innerHTML = '<i class="ph ph-' + (tipo === 'err' ? 'warning-circle' : tipo === 'ok' ? 'check-circle' : 'info') + '"></i><span>' + esc(msg) + '</span>';
   $('#toasts').appendChild(el);
-  setTimeout(function () { el.remove(); }, tipo === 'err' ? 7000 : 3500);
+  setTimeout(function () { el.classList.add('saliendo'); setTimeout(function () { el.remove(); }, 260); }, tipo === 'err' ? 7000 : 3500);
 }
 
 /** modal({titulo, cuerpo(HTML), botones:[{txt, clase, onClick(cerrar)}], ancho}) → { el, cerrar } */
@@ -83,7 +86,8 @@ function modal(o) {
   const velo = document.createElement('div');
   velo.className = 'velo';
   velo.innerHTML = '<div class="modal ' + (o.ancho ? 'ancho' : '') + '" role="dialog" aria-modal="true"><header><h2>' + esc(o.titulo) + '</h2><button class="btn-ico" data-x aria-label="Cerrar"><i class="ph ph-x"></i></button></header><div class="cuerpo">' + (o.cuerpo || '') + '</div>' + ((o.botones && o.botones.length) ? '<footer></footer>' : '') + '</div>';
-  const cerrar = function () { velo.remove(); document.removeEventListener('keydown', alEsc); };
+  let cerrado = false;
+  const cerrar = function () { if (cerrado) return; cerrado = true; document.removeEventListener('keydown', alEsc); velo.classList.add('saliendo'); setTimeout(function () { velo.remove(); }, 190); };
   const alEsc = function (e) { if (e.key === 'Escape') cerrar(); };
   document.addEventListener('keydown', alEsc);
   velo.addEventListener('mousedown', function (e) { if (e.target === velo) cerrar(); });
@@ -163,10 +167,47 @@ window.addEventListener('hashchange', function () {
 window.addEventListener('beforeunload', function (e) { if (window.__sucio) { e.preventDefault(); e.returnValue = ''; } });
 
 function ir(h) { location.hash = h; }
+function cerrarMenu() { $('#side').classList.remove('abierta'); $('#velo-lat').classList.remove('on'); }
+
+/* Enlaces internos (#/…): se navega por JavaScript para que nunca recarguen el marco de Apps Script (pantalla en blanco). */
+document.addEventListener('click', function (e) {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+  const h = a.getAttribute('href');
+  if (h && h.indexOf('#/') === 0) {
+    e.preventDefault();
+    if (location.hash === h) navegar(); else location.hash = h;
+  } else if (h && /^https?:/i.test(h) && !a.target) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+});
+
+/* Esqueletos de carga */
+function esqNav() {
+  let h = ''; for (let i = 0; i < 8; i++) h += '<div class="esq-nav"><span class="esq" style="width:30px;height:30px;border-radius:9px"></span><span class="esq" style="height:12px;flex:1;max-width:' + (100 + (i * 37) % 70) + 'px"></span></div>';
+  return h;
+}
+function esqInicio() {
+  return '<div class="esq c" style="height:190px"></div><div class="kpis" style="margin-top:20px">' + [1, 2, 3, 4].map(function () { return '<div class="esq c" style="height:84px"></div>'; }).join('') + '</div><div class="esq-rejilla">' + [1, 2, 3, 4, 5, 6].map(function () { return '<div class="esq c" style="height:150px"></div>'; }).join('') + '</div>';
+}
+function esqArticulo() {
+  return '<div class="esq" style="height:12px;width:240px;margin-bottom:22px"></div><div class="esq" style="height:38px;width:70%;margin-bottom:16px"></div><div class="esq" style="height:14px;width:90%;margin-bottom:10px"></div><div class="esq c" style="height:70px;margin:18px 0"></div><div class="esq c" style="height:360px"></div>';
+}
+
+/** Cuenta animada de 0 al valor en los elementos con data-n (su primer nodo hijo es el texto). */
+function animarNumeros(raiz) {
+  $$('[data-n]', raiz).forEach(function (el) {
+    const fin = +el.dataset.n; if (!fin) return;
+    const t0 = performance.now(), dur = 800;
+    (function paso(t) {
+      const k = Math.min(1, (t - t0) / dur), v = Math.round(fin * (1 - Math.pow(1 - k, 3)));
+      el.firstChild.nodeValue = String(v); if (k < 1) requestAnimationFrame(paso);
+    })(t0);
+  });
+}
 
 function navegar() {
   const r = rutaActual();
-  $('#side').classList.remove('abierta');
+  cerrarMenu();
   window.scrollTo(0, 0);
   const v = $('#vista');
   const o = r.p[0] || '';
@@ -186,8 +227,7 @@ function vistaNoEncontrada(v) { v.innerHTML = '<div class="vacio"><i class="ph p
 
 /* ── Cabecera ── */
 function pintarCabecera() {
-  const logo = S.cfg.logo_url ? '<img src="' + esc(S.cfg.logo_url) + '" alt="">' : '';
-  $('#marca').innerHTML = logo + '<span>OXO<span class="sub">PEDIA</span></span>';
+  $('#ver').textContent = 'v' + (window.VERSION || '');
   const ini = (S.user.nombre || S.user.email).split(' ').map(function (p) { return p.charAt(0); }).slice(0, 2).join('').toUpperCase();
   $('#yo').innerHTML = '<div class="avatar">' + esc(ini) + '</div><div class="quien"><b>' + esc(S.user.nombre) + '</b><span>' + esc(S.user.rol) + '</span></div>';
   const ico = $('#btn-tema i'); ico.className = 'ph ph-' + (document.documentElement.dataset.tema === 'oscuro' ? 'sun' : 'moon');
@@ -213,6 +253,7 @@ function pintarNav() {
   const actSlug = r.p[0] === 'a' ? r.p[1] : '';
   const actRaiz = actSec ? (raizDe(secPorId(actSec)) || {}).id : null;
   if (actRaiz) S.abiertas = new Set([actRaiz]); // acordeón: solo queda abierta la sección actual
+  const recienAbierta = actRaiz && actRaiz !== S.abPrev; S.abPrev = actRaiz;
   let h = '<div class="grupo-t etq">Navegación</div>';
   h += '<a class="nav-i ' + (r.p.length === 0 ? 'act' : '') + '" href="#/" style="--c:#49677a"><span class="ico"><i class="ph ph-house"></i></span>Inicio</a>';
   h += '<div class="grupo-t etq" style="margin-top:14px">Secciones</div>';
@@ -221,7 +262,7 @@ function pintarNav() {
     const total = artsDeArbol(s).length;
     h += '<a class="nav-i ' + (abierta ? 'abierto ' : '') + (actRaiz === s.id && !actSlug ? 'act' : '') + '" href="' + rutaSec(s) + '" data-sec="' + s.id + '" style="--c:' + esc(s.color) + '"><span class="ico"><i class="ph ' + esc(s.icono) + '"></i></span><span>' + esc(s.nombre) + '</span><i class="ph ph-caret-right flecha"></i></a>';
     if (abierta) {
-      h += '<div class="nav-arts" style="--c:' + esc(s.color) + '">';
+      h += '<div class="nav-arts' + (recienAbierta && actRaiz === s.id ? ' anim' : '') + '" style="--c:' + esc(s.color) + '">';
       artsDe(s.id).forEach(function (a) { h += itemArt(a, s.color, actSlug); });
       hijosDe(s.id).forEach(function (hs) {
         h += '<div class="nav-sub">' + esc(hs.nombre) + '</div>';
@@ -236,21 +277,21 @@ function pintarNav() {
     h += '<a class="nav-i" href="#/nuevo" style="--c:#c19528"><span class="ico"><i class="ph ph-plus"></i></span>Nuevo artículo</a>';
     h += '<a class="nav-i ' + (r.p[0] === 'admin' ? 'act' : '') + '" href="#/admin/secciones" style="--c:#49677a"><span class="ico"><i class="ph ph-gear"></i></span>Gestión</a>';
   }
-  $('#side').innerHTML = h;
+  $('#nav').innerHTML = h;
 }
 
 /* ── Arranque ── */
 function pantallaError(msg) {
-  $('#cargando-app').innerHTML = '<div style="max-width:460px;text-align:center;padding:24px;font:500 .95rem Montserrat,Arial;color:#464b4e;letter-spacing:0;text-transform:none"><b style="display:block;font-size:1.2rem;color:#1c1c1c;margin-bottom:8px">No pudimos abrir OxoPedia</b>' + esc(msg) + '<p><button class="btn btn-p" onclick="location.reload()" style="margin-top:16px">Reintentar</button></p></div>';
+  $('#vista').innerHTML = '<div class="vacio"><i class="ph ph-plugs"></i><h2>No pudimos abrir OxoPedia</h2><p class="suave" style="margin:6px 0 16px">' + esc(msg) + '</p><button class="btn btn-p" onclick="location.reload()"><i class="ph ph-arrow-clockwise"></i> Reintentar</button></div>';
+  $('#nav').innerHTML = ''; $('#yo').innerHTML = '';
 }
 
 async function arrancar() {
+  $('#nav').innerHTML = esqNav(); $('#vista').innerHTML = esqInicio();
   try {
     const d = await api('arranque');
     S.user = d.usuario; S.cfg = d.config; S.secciones = d.secciones; S.articulos = d.articulos;
   } catch (e) { pantallaError(e.message); return; }
-  $('#cargando-app').remove();
-  $('#top').hidden = false; $('#shell').hidden = false;
   document.title = S.cfg.nombre_app + ' · Conocimiento de TI';
   pintarCabecera();
   if (!location.hash && window.RUTA_INICIAL) location.hash = window.RUTA_INICIAL;
@@ -259,7 +300,8 @@ async function arrancar() {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-  $('#btn-menu').onclick = function () { $('#side').classList.toggle('abierta'); };
+  $('#btn-menu').onclick = function () { const ab = $('#side').classList.toggle('abierta'); $('#velo-lat').classList.toggle('on', ab); };
+  $('#velo-lat').onclick = cerrarMenu;
   $('#btn-tema').onclick = function () {
     const t = document.documentElement.dataset.tema === 'oscuro' ? 'claro' : 'oscuro';
     document.documentElement.dataset.tema = t;
