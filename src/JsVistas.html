@@ -106,6 +106,22 @@ function itemLista(a, extra) {
   return '<a class="item-art" href="' + rutaArt(a) + '"><span class="punto-sec" style="--c:' + esc(colorDe(a.seccion_id)) + '"></span><span class="t"><b>' + esc(a.titulo) + '</b><small>' + esc(s ? s.nombre : '') + (extra ? ' · ' + extra : '') + '</small></span>' + badgeEstado(a.estado) + '</a>';
 }
 
+/** Panel derecho del inicio: acciones, progreso de validación, recientes y atajos. */
+function panelDerecho(d) {
+  let h = '<aside class="rail">';
+  h += '<div class="rail-c"><span class="etq">Acciones</span><div class="rail-acc">' +
+    (esAdmin() ? '<a class="rail-b" href="#/nuevo"><i class="ph ph-plus-circle"></i>Nuevo artículo</a><a class="rail-b" href="#/admin/secciones"><i class="ph ph-gear"></i>Gestionar contenido</a>' : '') +
+    '<button type="button" class="rail-b" data-manual><i class="ph ph-info"></i>Manual de usuario</button>' +
+    '<button type="button" class="rail-b" data-recargar><i class="ph ph-arrow-clockwise"></i>Actualizar datos</button></div></div>';
+  h += '<div class="rail-c"><span class="etq">Contenido validado</span><div class="prog"><i style="width:' + d.pct + '%"></i></div>' +
+    '<p class="peq suave" style="margin:8px 0 0"><b>' + d.val + '</b> de <b>' + d.total + '</b> artículos · ' + d.rev + ' en revisión · ' + d.bor + ' borradores</p></div>';
+  if (d.recientes.length) h += '<div class="rail-c"><span class="etq">Últimos cambios</span>' + d.recientes.map(function (a) {
+    return '<a class="rail-l" href="' + rutaArt(a) + '"><span class="punto-sec" style="--c:' + esc(colorDe(a.seccion_id)) + '"></span><span>' + esc(a.titulo) + '<small>' + fechaCorta(a.actualizado_en) + '</small></span></a>';
+  }).join('') + '</div>';
+  h += '<div class="rail-c"><span class="etq">Atajos</span><p class="rail-k"><kbd>/</kbd> o <kbd>Ctrl</kbd>+<kbd>K</kbd><span>Buscar</span></p></div>';
+  return h + '</aside>';
+}
+
 function vistaInicio(v) {
   _navId++;
   const total = S.articulos.length;
@@ -120,13 +136,8 @@ function vistaInicio(v) {
   let h = '<section class="hero"><span class="etq">Conocimiento de TI · OxoHotel</span><h1>Hola, ' + esc(nombre) + '. <span>¿Qué necesitas resolver hoy?</span></h1>' +
     '<p>Procedimientos de soporte y desarrollo, de punta a punta. Úsalo para capacitarte o como manual de consulta diaria.</p>' +
     '<div class="buscador-grande"><i class="ph ph-magnifying-glass"></i><input id="q-home" type="search" placeholder="Busca un procedimiento, herramienta o error…" autocomplete="off"></div></section>';
-  h += '<div class="kpis">' +
-    '<div class="kpi"><div class="n" data-n="' + total + '">0</div><div class="l"><i class="ph ph-files"></i>Artículos</div></div>' +
-    '<div class="kpi verde"><div class="n" data-n="' + pct + '">0<sup>%</sup></div><div class="l"><i class="ph ph-seal-check"></i>Validados (' + val + ')</div></div>' +
-    '<div class="kpi"><div class="n" data-n="' + cuenta('En revisión') + '">0</div><div class="l"><i class="ph ph-magnifying-glass"></i>En revisión</div></div>' +
-    '<div class="kpi oro"><div class="n" data-n="' + cuenta('Borrador') + '">0</div><div class="l"><i class="ph ph-pencil-simple-line"></i>Borradores</div></div></div>';
-
-  h += '<div class="sec-t"><h2>Accesos rápidos</h2>' + (esAdmin() ? '<a class="btn btn-t btn-chico" href="#/admin/secciones"><i class="ph ph-plus"></i> Gestionar secciones</a>' : '') + '</div><div class="grid-sec">';
+  h += '<div class="inicio-cols"><div class="inicio-main">';
+  h += '<div class="sec-t" style="margin-top:0"><h2>Accesos rápidos</h2>' + (esAdmin() ? '<a class="btn btn-t btn-chico" href="#/admin/secciones"><i class="ph ph-plus"></i> Gestionar secciones</a>' : '') + '</div><div class="grid-sec">';
   raices().forEach(function (s) {
     const n = artsDeArbol(s).length;
     h += '<a class="tarjeta-sec" href="' + rutaSec(s) + '" style="--acc:' + esc(s.color) + '"><span class="ico"><i class="ph ' + esc(s.icono) + '"></i></span><h3>' + esc(s.nombre) + '</h3><p>' + esc(s.descripcion) + '</p><span class="pie"><span>' + n + (n === 1 ? ' artículo' : ' artículos') + '</span><i class="ph ph-arrow-right"></i></span></a>';
@@ -142,8 +153,8 @@ function vistaInicio(v) {
     h += '<div class="sec-t"><h2>Por revisar</h2><span class="etq">Más de ' + S.cfg.dias_para_revisar + ' días sin revisión</span></div><div class="card plana lista-art">' +
       vencidos.map(function (a) { return itemLista(a, 'revisado ' + fechaCorta(a.fecha_revision)); }).join('') + '</div>';
   }
+  h += '</div>' + panelDerecho({ total: total, val: val, pct: pct, rev: cuenta('En revisión'), bor: cuenta('Borrador'), recientes: recientes.slice(0, 5) }) + '</div>';
   v.innerHTML = h;
-  animarNumeros(v);
   const qh = $('#q-home', v);
   qh.addEventListener('keydown', function (e) { if (e.key === 'Enter' && qh.value.trim()) ir('#/buscar?q=' + encodeURIComponent(qh.value.trim())); });
 }
@@ -192,8 +203,15 @@ async function vistaArticulo(v, slug) {
   pintarArticulo(v, a0.id);
 }
 
+/** Tras un cambio el catálogo se refresca (y con él la caché): se vuelve a pedir el artículo y se repinta. */
+function recargarArticulo(artId) {
+  const a = S.articulos.find(function (x) { return x.id === artId; });
+  if (a) vistaArticulo($('#vista'), a.slug);
+}
+
 function pintarArticulo(v, artId) {
   const d = S.cacheArt[artId];
+  if (!d) { recargarArticulo(artId); return; }
   const a = S.articulos.find(function (x) { return x.id === artId; }) || d.articulo;
   const s = secPorId(a.seccion_id) || { nombre: '', color: '#49677a', slug: '' };
   const padre = s.padre_id ? secPorId(s.padre_id) : null;
@@ -223,7 +241,11 @@ function pintarArticulo(v, artId) {
   h += '<div class="cuerpo-art" id="cuerpo-art">' + (cuerpo || '<div class="vacio">Este artículo aún no tiene contenido.</div>') + '</div>';
   h += '<div class="nav-pie">' + (ant ? '<a href="' + rutaArt(ant) + '"><small>← Anterior</small>' + esc(ant.titulo) + '</a>' : '<span></span>') + (sig ? '<a class="sig" href="' + rutaArt(sig) + '"><small>Siguiente →</small>' + esc(sig.titulo) + '</a>' : '<span></span>') + '</div>';
   h += '</article>';
-  h += '<aside class="toc">' + (ctx.toc.length > 1 ? '<span class="etq">En esta página</span>' + ctx.toc.map(function (t) { return '<a class="' + (t.nivel === 3 ? 'n3' : '') + '" href="#" data-h="' + t.id + '">' + esc(t.txt) + '</a>'; }).join('') : '') + '</aside>';
+  h += '<aside class="toc">' + (ctx.toc.length > 1 ? '<div class="rail-c"><span class="etq">En esta página</span>' + ctx.toc.map(function (t) { return '<a class="' + (t.nivel === 3 ? 'n3' : '') + '" href="#" data-h="' + t.id + '">' + esc(t.txt) + '</a>'; }).join('') + '</div>' : '') +
+    (hermanos.length > 1 ? '<div class="rail-c"><span class="etq">En esta sección</span>' + hermanos.map(function (x) {
+      return '<a class="rail-l' + (x.id === a.id ? ' act' : '') + '" href="' + rutaArt(x) + '"><span class="punto-sec" style="--c:' + esc(colorDe(x.seccion_id)) + '"></span><span>' + esc(x.titulo) + '</span></a>';
+    }).join('') + '</div>' : '') +
+    '<div class="rail-c"><span class="etq">Ayuda</span><div class="rail-acc"><button type="button" class="rail-b" data-manual><i class="ph ph-info"></i>Manual de usuario</button><button type="button" class="rail-b" data-recargar><i class="ph ph-arrow-clockwise"></i>Actualizar datos</button></div></div></aside>';
   h += '</div></div>';
   v.innerHTML = h;
   cargarImagenes(v);
@@ -245,7 +267,7 @@ function pintarArticulo(v, artId) {
   if (esAdmin()) {
     $('#a-estado', v).onclick = function () { cambiarEstadoUI(a); };
     $('#a-rev', v).onclick = async function (e) {
-      await conBoton(e.currentTarget, async function () { await api('marcarRevisado', { id: a.id }); await refrescarCatalogo(); toast('Marcado como revisado', 'ok'); pintarArticulo(v, a.id); });
+      await conBoton(e.currentTarget, async function () { await api('marcarRevisado', { id: a.id }); await refrescarCatalogo(); toast('Marcado como revisado', 'ok'); recargarArticulo(a.id); });
     };
     $('#a-elim', v).onclick = async function () {
       if (!(await confirmar('Eliminar artículo', '«' + a.titulo + '» dejará de mostrarse. Se conserva en la hoja de cálculo (activo = FALSE) y en el historial.', 'Eliminar', true))) return;
@@ -262,7 +284,7 @@ function cambiarEstadoUI(a) {
   botones: [{ txt: 'Cancelar' }, { txt: 'Guardar', clase: 'btn-p', onClick: function (cerrar, btn) {
     conBoton(btn, async function () {
       await api('cambiarEstado', { id: a.id, estado: $('#ce-estado', m.el).value, nota: $('#ce-nota', m.el).value });
-      await refrescarCatalogo(); cerrar(); toast('Estado actualizado', 'ok'); pintarArticulo($('#vista'), a.id);
+      await refrescarCatalogo(); cerrar(); toast('Estado actualizado', 'ok'); recargarArticulo(a.id);
     });
   } }] });
   $('#ce-estado', m.el).value = a.estado;
@@ -284,7 +306,7 @@ async function verHistorial(artId) {
     $$('[data-res]', m.el).forEach(function (b) {
       b.onclick = async function () {
         if (!(await confirmar('Restaurar versión', 'El artículo volverá al contenido de esa versión (se guarda como una versión nueva, no se pierde nada).', 'Restaurar'))) return;
-        conBoton(b, async function () { await api('restaurarVersion', { id: b.dataset.res }); await refrescarCatalogo(); m.cerrar(); toast('Versión restaurada', 'ok'); pintarArticulo($('#vista'), artId); });
+        conBoton(b, async function () { await api('restaurarVersion', { id: b.dataset.res }); await refrescarCatalogo(); m.cerrar(); toast('Versión restaurada', 'ok'); recargarArticulo(artId); });
       };
     });
   } catch (e) { $('.cuerpo', m.el).innerHTML = '<p>' + esc(e.message) + '</p>'; }

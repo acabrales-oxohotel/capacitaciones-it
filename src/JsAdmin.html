@@ -1,7 +1,6 @@
 <script>
 /* OxoPedia · Administración: secciones, orden de artículos, usuarios y configuración */
 
-const ICONOS_SUGERIDOS = ['plugs-connected', 'bed', 'desktop-tower', 'hard-drives', 'buildings', 'sparkle', 'code', 'books', 'shield-check', 'wifi-high', 'printer', 'database', 'cloud', 'key', 'wrench', 'lifebuoy', 'lightning', 'globe', 'git-branch', 'robot', 'lightbulb', 'folder'];
 const COLORES_SUGERIDOS = ['#3a6f9a', '#c19528', '#5a7d5f', '#b0613f', '#7a4e73', '#c4526b', '#2b7a78', '#5b6770', '#49677a'];
 
 function vistaAdmin(v, tab) {
@@ -61,8 +60,7 @@ function editarSeccion(id) {
     '<div class="campo"><label>Descripción</label><textarea id="sc-desc" rows="2" maxlength="300">' + esc(s.descripcion) + '</textarea></div>' +
     '<div class="campo"><label>Sección superior (opcional)</label><select id="sc-padre" ' + (tieneHijos ? 'disabled' : '') + '><option value="">— Es una sección principal —</option>' + posiblesPadres.map(function (p) { return '<option value="' + p.id + '"' + (p.id === s.padre_id ? ' selected' : '') + '>' + esc(p.nombre) + '</option>'; }).join('') + '</select></div>' +
     '<div class="fila dos"><div class="campo"><label>Color de acento</label><input type="color" id="sc-color" value="' + esc(s.color) + '"><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + COLORES_SUGERIDOS.map(function (c) { return '<button type="button" data-col="' + c + '" style="width:24px;height:24px;border-radius:50%;border:2px solid var(--paper);box-shadow:0 0 0 1px var(--gm);background:' + c + ';cursor:pointer" aria-label="' + c + '"></button>'; }).join('') + '</div></div>' +
-    '<div class="campo"><label>Ícono (Phosphor)</label><input id="sc-icono" value="' + esc(s.icono) + '" placeholder="ph-folder"><div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">' + ICONOS_SUGERIDOS.map(function (i) { return '<button type="button" class="btn-ico" data-ico="ph-' + i + '" title="ph-' + i + '" style="width:30px;height:30px;border:1px solid var(--gl)"><i class="ph ph-' + i + '"></i></button>'; }).join('') + '</div></div></div>' +
-    '<p class="peq suave">Catálogo completo de íconos: phosphoricons.com (usa el nombre con el prefijo «ph-»).</p>',
+    '</div>' + selectorIconosHtml(s.icono),
   botones: [{ txt: 'Cancelar' }, { txt: 'Guardar', clase: 'btn-p', onClick: function (cerrar, btn) {
     conBoton(btn, async function () {
       await api('guardarSeccion', { id: id || '', nombre: $('#sc-nombre', m.el).value, descripcion: $('#sc-desc', m.el).value, padre_id: $('#sc-padre', m.el).value, color: $('#sc-color', m.el).value, icono: $('#sc-icono', m.el).value.trim() });
@@ -70,7 +68,7 @@ function editarSeccion(id) {
     });
   } }] });
   $$('[data-col]', m.el).forEach(function (b) { b.onclick = function () { $('#sc-color', m.el).value = b.dataset.col; }; });
-  $$('[data-ico]', m.el).forEach(function (b) { b.onclick = function () { $('#sc-icono', m.el).value = b.dataset.ico; }; });
+  selectorIconos(m.el);
 }
 
 /* ───────── Orden de artículos ───────── */

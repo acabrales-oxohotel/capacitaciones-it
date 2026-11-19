@@ -1,0 +1,121 @@
+<script>
+/* OxoPedia · Ayuda: manual de usuario, botón de actualizar y catálogo de íconos con buscador */
+
+/* ── Actualizar datos (catálogo + vista actual) ── */
+async function recargarTodo(btn) {
+  if (window.__sucio && !window.confirm('Tienes cambios sin guardar en el editor. Si actualizas se perderán. ¿Continuar?')) return;
+  const ico = btn && btn.querySelector('i'); if (ico) ico.classList.add('girar');
+  try { await refrescarCatalogo(); window.__sucio = false; navegar(); toast('Datos actualizados', 'ok'); }
+  catch (e) { toast(e.message, 'err'); }
+  finally { if (ico) ico.classList.remove('girar'); }
+}
+
+/* ── Manual de usuario ── */
+const MANUAL = [
+  { id: 'inicio', t: 'Primeros pasos', i: 'rocket-launch', h:
+    '<p><b>OxoPedia</b> es la base de conocimiento de TI de OxoHotel: procedimientos de soporte, software hotelero, infraestructura y desarrollo, explicados paso a paso.</p>' +
+    '<ul><li>La <b>barra lateral</b> agrupa el contenido por secciones. Al abrir una sección se despliegan sus artículos.</li>' +
+    '<li>El <b>Inicio</b> muestra los accesos rápidos a cada sección, los artículos pendientes de validar y los últimos cambios.</li>' +
+    '<li>El botón <i class="ph ph-moon"></i> cambia entre tema oscuro y claro; se recuerda en tu navegador.</li>' +
+    '<li>El botón <i class="ph ph-arrow-clockwise"></i> actualiza los datos si alguien más publicó o modificó contenido.</li></ul>' },
+  { id: 'buscar', t: 'Buscar y leer', i: 'magnifying-glass', h:
+    '<p>Pulsa <kbd>/</kbd> o <kbd>Ctrl</kbd>+<kbd>K</kbd> desde cualquier pantalla para buscar. La búsqueda revisa títulos, etiquetas, resúmenes y también el contenido de los artículos.</p>' +
+    '<ul><li>Las sugerencias aparecen mientras escribes; con las flechas y <kbd>Enter</kbd> abres una.</li>' +
+    '<li>En un artículo, el panel derecho muestra el índice de la página y los demás artículos de la sección.</li>' +
+    '<li>Los bloques de código tienen botón <b>Copiar</b>; las imágenes se amplían al hacer clic.</li>' +
+    '<li>Las listas de verificación recuerdan lo que marcaste en tu navegador.</li>' +
+    '<li><b>Copiar enlace</b> te da la dirección directa al artículo; <b>Imprimir</b> genera una versión limpia.</li></ul>' },
+  { id: 'estados', t: 'Estados del contenido', i: 'seal-check', h:
+    '<p>Cada artículo tiene un estado que indica qué tan confiable es:</p>' +
+    '<ul><li><b>Borrador</b>: en construcción. Puede tener datos marcados como <mark class="completar">[COMPLETAR]</mark>.</li>' +
+    '<li><b>En revisión</b>: completo, a la espera de que alguien lo pruebe.</li>' +
+    '<li><b>Validado</b>: probado y aprobado por un administrador. Queda registrada la fecha de revisión.</li></ul>' +
+    '<p>Un artículo validado se marca <b>por revisar</b> cuando pasa el tiempo definido sin una nueva revisión.</p>' },
+  { id: 'editar', t: 'Crear y editar', i: 'pencil-simple-line', admin: true, h:
+    '<p>Disponible para administradores.</p>' +
+    '<ul><li><b>Nuevo artículo</b>: desde la barra lateral o desde una sección. Elige sección, título, resumen y etiquetas.</li>' +
+    '<li>El contenido se arma con <b>bloques</b>: título, texto, paso a paso, imagen, código, alerta, enlace, adjunto, lista de verificación, tabla y desplegable.</li>' +
+    '<li>Para las imágenes, arrástralas o pégalas (<kbd>Ctrl</kbd>+<kbd>V</kbd>) sobre el bloque; se comprimen y se guardan de inmediato.</li>' +
+    '<li>La vista previa se desplaza junto con el editor.</li>' +
+    '<li>Al guardar puedes dejar una nota; cada guardado crea una versión en el <b>Historial</b>, desde donde se puede ver y restaurar.</li>' +
+    '<li>Si otra persona guardó el mismo artículo mientras lo editabas, el sistema te avisa antes de sobrescribir.</li>' +
+    '<li><b>Cambiar estado</b> y <b>Marcar como revisado</b> están en la cabecera de cada artículo.</li></ul>' +
+    '<div class="alerta advertencia"><i class="ph ph-warning"></i><div>No escribas contraseñas, direcciones IP ni credenciales en los artículos.</div></div>' },
+  { id: 'gestion', t: 'Gestión', i: 'gear', admin: true, h:
+    '<p>En <b>Gestión</b> los administradores pueden crear, ordenar y editar secciones (nombre, color e ícono), ordenar artículos y administrar usuarios.</p>' +
+    '<p>Para elegir el ícono de una sección usa el buscador: escribe una palabra como «red», «correo» o «servidor».</p>' },
+  { id: 'ayuda', t: 'Dudas frecuentes', i: 'question', h:
+    '<p><b>No veo un cambio reciente.</b> Pulsa <i class="ph ph-arrow-clockwise"></i> para actualizar los datos o recarga la página con <kbd>Ctrl</kbd>+<kbd>F5</kbd>.</p>' +
+    '<p><b>Una imagen no carga.</b> Actualiza la página; si persiste, avisa al equipo de tecnología.</p>' +
+    '<p><b>Necesito permisos de edición.</b> Solicítalos al equipo de tecnología; por defecto todos entran como lectores.</p>' }
+];
+
+function abrirManual(tabId) {
+  const lista = MANUAL.filter(function (x) { return !x.admin || esAdmin(); });
+  const m = modal({ titulo: 'Manual de usuario', ancho: true, cuerpo:
+    '<div class="manual"><nav class="manual-nav">' + lista.map(function (x) { return '<button type="button" data-mt="' + x.id + '"><i class="ph ph-' + x.i + '"></i>' + esc(x.t) + '</button>'; }).join('') + '</nav><div class="manual-c txt"></div></div>' });
+  const mostrar = function (id) {
+    const x = lista.find(function (y) { return y.id === id; }) || lista[0];
+    $$('[data-mt]', m.el).forEach(function (b) { b.classList.toggle('act', b.dataset.mt === x.id); });
+    const c = $('.manual-c', m.el); c.innerHTML = '<h3>' + esc(x.t) + '</h3>' + x.h; c.scrollTop = 0;
+  };
+  $$('[data-mt]', m.el).forEach(function (b) { b.onclick = function () { mostrar(b.dataset.mt); }; });
+  mostrar(tabId);
+}
+
+document.addEventListener('click', function (e) {
+  const man = e.target.closest && e.target.closest('[data-manual]');
+  if (man) { abrirManual(); return; }
+  const rec = e.target.closest && e.target.closest('[data-recargar]');
+  if (rec) recargarTodo(rec);
+});
+
+/* ── Catálogo de íconos (nombre Phosphor | palabras clave) ── */
+const CATALOGO_ICONOS = ('house|casa inicio hogar,house-line|casa,buildings|edificios hotel sede,building|edificio,bed|cama habitacion hotel,door|puerta,key|llave acceso,lock|candado seguridad,lock-key|bloqueo clave,shield-check|escudo seguridad proteccion,shield|escudo,shield-warning|alerta seguridad,shield-star|seguridad,fingerprint|huella biometria,siren|alarma sirena,' +
+  'desktop|escritorio pantalla pc,desktop-tower|torre computador pc,laptop|portatil computador,monitor|monitor pantalla,monitor-play|pantalla video,device-mobile|celular movil telefono,device-tablet|tableta,keyboard|teclado,mouse|raton,printer|impresora,webcam|camara web,headset|diadema soporte,headphones|audifonos,speaker-high|parlante sonido,microphone|microfono,television|tv television,projector-screen|proyector,' +
+  'phone|telefono,phone-call|llamada telefono,hard-drives|servidor discos almacenamiento,hard-drive|disco,database|base datos,floppy-disk|guardar disquete,sd-card|memoria tarjeta,disc|disco,cpu|procesador,circuit-board|circuito hardware,memory|memoria ram,battery-full|bateria ups energia,fan|ventilador,thermometer|temperatura,' +
+  'cloud|nube,cloud-arrow-up|subir nube,cloud-arrow-down|descargar nube respaldo,cloud-check|nube respaldo,network|red,share-network|red compartir,wifi-high|wifi inalambrico red,wifi-slash|sin wifi,wifi-x|sin conexion,plugs|enchufes conexion,plugs-connected|conectividad conexion remoto,plug|enchufe energia,usb|usb,bluetooth|bluetooth,cell-signal-full|senal celular,globe|internet mundo web,globe-hemisphere-west|mundo,link|enlace,link-simple|enlace,' +
+  'git-branch|rama git desarrollo,git-commit|commit git,git-merge|fusionar git,git-pull-request|pull request git,code|codigo programacion,code-block|bloque codigo,terminal|terminal consola comandos,terminal-window|consola comandos,brackets-curly|json desarrollo,bug|error bug,bug-beetle|error bug,app-window|aplicacion ventana,browser|navegador,browsers|navegadores,stack|capas pila,cube|cubo modulo,puzzle-piece|integracion pieza plugin,' +
+  'robot|robot ia,brain|cerebro ia inteligencia,sparkle|ia brillo magia,magic-wand|varita automatizar,lightbulb|idea bombillo,lightning|rayo energia rapido,rocket|cohete,rocket-launch|lanzamiento cohete,atom|atomo,flask|laboratorio pruebas,microscope|microscopio,' +
+  'gear|configuracion engranaje,gear-six|configuracion,wrench|llave herramienta,hammer|martillo,toolbox|caja herramientas,screwdriver|destornillador,faders|ajustes,sliders|ajustes,sliders-horizontal|ajustes filtros,lifebuoy|soporte ayuda salvavidas,question|pregunta ayuda,info|informacion,warning|advertencia,warning-circle|advertencia,check-circle|correcto ok,x-circle|error cerrar,bell|notificacion campana,bell-ringing|alerta notificacion,' +
+  'envelope|correo email,envelope-simple|correo email,chat-circle|chat mensaje,chat-dots|chat mensaje,chats|conversacion,megaphone|anuncio comunicado,handshake|acuerdo alianza,whatsapp-logo|whatsapp,microsoft-teams-logo|teams,microsoft-outlook-logo|outlook correo,microsoft-excel-logo|excel,microsoft-word-logo|word,microsoft-powerpoint-logo|powerpoint,google-logo|google,google-drive-logo|drive,google-chrome-logo|chrome navegador,windows-logo|windows,apple-logo|apple mac,android-logo|android,linux-logo|linux,github-logo|github,slack-logo|slack,' +
+  'users|usuarios equipo personas,user|usuario persona,user-circle|usuario perfil,user-gear|usuario administrador,user-plus|nuevo usuario alta,identification-card|identificacion carnet,address-book|contactos directorio,' +
+  'calendar|calendario fecha,calendar-check|calendario agenda,clock|reloj hora,timer|temporizador,hourglass|espera tiempo,' +
+  'folder|carpeta,folder-open|carpeta abierta,files|archivos documentos,file-text|documento texto,file-pdf|pdf,file-doc|word documento,file-xls|excel hoja calculo,file-zip|comprimido zip,file-code|archivo codigo,note|nota,notebook|cuaderno,notepad|bloc notas,book|libro manual,book-open|libro abierto,books|libros biblioteca,bookmark|marcador,clipboard|portapapeles,clipboard-text|formulario checklist,list-checks|lista verificacion tareas,checks|verificado,check-square|casilla,graduation-cap|capacitacion educacion,chalkboard-teacher|capacitacion clase,certificate|certificado,' +
+  'target|objetivo meta,flag|bandera,trophy|trofeo logro,medal|medalla,star|estrella favorito,heart|corazon,thumbs-up|aprobado,eye|ver visible,magnifying-glass|buscar lupa,funnel|filtro embudo,sort-ascending|ordenar,' +
+  'chart-bar|grafico barras reporte,chart-line|grafico lineas,chart-pie|grafico torta,presentation-chart|presentacion,gauge|medidor rendimiento,speedometer|velocidad rendimiento,pulse|monitoreo pulso,' +
+  'receipt|factura recibo,credit-card|tarjeta pago,money|dinero,wallet|billetera,bank|banco,coins|monedas,shopping-cart|compras carrito,storefront|tienda,package|paquete inventario,truck|camion logistica,' +
+  'airplane|avion viaje,car|carro,map-pin|ubicacion,map-trifold|mapa,compass|brujula,navigation-arrow|navegacion,sun|sol,moon|luna,snowflake|frio aire acondicionado,drop|agua,flame|fuego incendio,leaf|hoja,tree|arbol,plant|planta,' +
+  'coffee|cafe,fork-knife|restaurante comida,wine|bar vino,bathtub|bano,shower|ducha,couch|sofa lobby,' +
+  'video-camera|video camara cctv,camera|camara foto,image|imagen,film-strip|pelicula,music-note|musica,game-controller|juegos,qr-code|codigo qr,barcode|codigo barras,scan|escaner,' +
+  'download-simple|descargar,upload-simple|subir,arrows-clockwise|sincronizar,arrow-clockwise|recargar,swap|intercambio,recycle|reciclar,trash|eliminar basura,archive|archivo historico,tag|etiqueta,tag-simple|etiqueta,translate|traducir idioma,text-aa|texto,paint-brush|pincel diseno,palette|paleta colores,pencil-simple|editar lapiz,pen-nib|pluma,scissors|tijeras,ruler|regla,crop|recortar,first-aid-kit|botiquin emergencia,hand-heart|ayuda cuidado,layout|diseno plantilla,squares-four|cuadricula modulos')
+  .split(',').map(function (x) { const p = x.split('|'); return { n: p[0], k: _normChars(p[0].replace(/-/g, ' ') + ' ' + p[1]) }; });
+
+/**
+ * Selector de íconos con buscador. Inserta el HTML con selectorIconosHtml(valor) y luego llama a selectorIconos(contenedor, inputId).
+ */
+function selectorIconosHtml(valor) {
+  return '<div class="campo"><label>Ícono</label><div class="ic-sel"><span class="ic-vista"><i class="ph ' + esc(valor) + '" id="ic-actual"></i></span><input id="sc-icono" value="' + esc(valor) + '" placeholder="ph-folder" aria-label="Nombre del ícono"></div>' +
+    '<div class="ic-buscar"><i class="ph ph-magnifying-glass"></i><input id="ic-q" type="search" placeholder="Buscar ícono: red, correo, servidor…" autocomplete="off"></div>' +
+    '<div class="ic-rejilla" id="ic-rejilla"></div><p class="peq suave" id="ic-info" style="margin:6px 0 0"></p></div>';
+}
+
+function selectorIconos(raiz) {
+  const campo = $('#sc-icono', raiz), q = $('#ic-q', raiz), rej = $('#ic-rejilla', raiz), info = $('#ic-info', raiz), act = $('#ic-actual', raiz);
+  const pintar = function () {
+    const t = _normChars(q.value).split(/\s+/).filter(Boolean);
+    const l = CATALOGO_ICONOS.filter(function (x) { return t.every(function (w) { return x.k.indexOf(w) >= 0; }); });
+    const sel = campo.value.trim();
+    rej.innerHTML = l.map(function (x) { return '<button type="button" class="ic-b' + (sel === 'ph-' + x.n ? ' act' : '') + '" data-ico="ph-' + x.n + '" title="' + x.n + '"><i class="ph ph-' + x.n + '"></i></button>'; }).join('') || '<span class="peq suave" style="grid-column:1/-1;padding:8px">Sin resultados. Prueba otra palabra.</span>';
+    info.textContent = l.length + ' de ' + CATALOGO_ICONOS.length + ' íconos. También puedes escribir un nombre de phosphoricons.com con el prefijo «ph-».';
+  };
+  q.addEventListener('input', pintar);
+  campo.addEventListener('input', function () { act.className = 'ph ' + campo.value.trim(); });
+  rej.addEventListener('click', function (e) {
+    const b = e.target.closest('[data-ico]'); if (!b) return;
+    campo.value = b.dataset.ico; act.className = 'ph ' + b.dataset.ico;
+    $$('.ic-b', rej).forEach(function (x) { x.classList.toggle('act', x === b); });
+  });
+  pintar();
+}
+</script>
