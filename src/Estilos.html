@@ -192,14 +192,16 @@ input[type=checkbox] { width: auto; accent-color: var(--blue); }
 .lightbox img { max-width: 100%; max-height: 100%; border-radius: 10px; animation: pop .3s var(--ease); }
 
 /* ── Inicio ── */
-.hero { position: relative; overflow: hidden; background: linear-gradient(135deg, color-mix(in srgb, var(--blue) 26%, var(--paper)) 0%, var(--paper) 62%); border: 1px solid var(--gl); border-radius: 18px; padding: 34px 38px; margin-bottom: 20px; display: grid; gap: 14px; box-shadow: var(--sombra); }
-.hero::after { content: ''; position: absolute; right: -90px; top: -90px; width: 300px; height: 300px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--gold) 38%, transparent), transparent 68%); pointer-events: none; }
-.hero > * { position: relative; z-index: 1; }
-.hero h1 span { color: var(--blue); }
-.hero p { color: var(--dark); max-width: 640px; font-size: 1.02rem; }
-.hero .buscador-grande { position: relative; max-width: 560px; }
-.hero .buscador-grande input { padding: 14px 16px 14px 46px; font-size: 1rem; border-radius: 12px; }
-.hero .buscador-grande .ph { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 1.2rem; color: var(--dark); }
+.hero { position: relative; overflow: hidden; isolation: isolate; color: #d3dee5; background: #0d1a24 url('https://acabrales-oxohotel.github.io/capacitaciones-it/assets/banner.png') right center / cover no-repeat; border: 1px solid rgba(141,177,199,.22); border-radius: 18px; padding: 40px 42px; margin-bottom: 20px; display: grid; gap: 14px; box-shadow: var(--sombra); min-height: 240px; align-content: center; }
+.hero::before { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(9,17,24,.88) 0%, rgba(9,17,24,.62) 48%, rgba(9,17,24,.12) 100%), linear-gradient(0deg, rgba(9,17,24,.35), transparent 40%); }
+.hero h1 { color: #fff; } .hero h1 span { color: #8fd0e8; }
+.hero p { color: #bccbd4; max-width: 560px; font-size: 1.02rem; }
+.hero .etq { color: #e0b94a; }
+.hero .buscador-grande { position: relative; max-width: 520px; }
+.hero .buscador-grande input { padding: 14px 16px 14px 46px; font-size: 1rem; border-radius: 12px; background: rgba(9,17,24,.55); border-color: rgba(255,255,255,.18); color: #fff; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.hero .buscador-grande input::placeholder { color: #9fb3bf; }
+.hero .buscador-grande input:focus { border-color: #8fd0e8; box-shadow: 0 0 0 3px rgba(143,208,232,.25); }
+.hero .buscador-grande .ph { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 1.2rem; color: #9fb3bf; }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
 .kpi { position: relative; overflow: hidden; background: var(--paper); border: 1px solid var(--gl); border-radius: var(--r); padding: 16px 18px; display: flex; flex-direction: column-reverse; gap: 2px; box-shadow: var(--sombra); transition: transform .25s var(--ease), border-color .2s; }
 .kpi:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--k, var(--blue)) 60%, var(--gl)); }
