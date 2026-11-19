@@ -40,7 +40,7 @@ async function vistaEditor(v, idOSlugSeccion, slugSeccion) {
   const id = ++_navId;
   const r = rutaActual();
   const esNuevo = r.p[0] === 'nuevo';
-  let meta, bloques = [], artId = null;
+  let meta, bloques = [], artId = null, baseAct = '';
   if (esNuevo) {
     const sec = secPorSlug(r.p[1]) || raices()[0];
     meta = { seccion_id: sec ? sec.id : '', titulo: '', resumen: '', etiquetas: '', responsable_email: S.user.email, estado: 'Borrador' };
@@ -51,10 +51,10 @@ async function vistaEditor(v, idOSlugSeccion, slugSeccion) {
     if (!a0) { vistaNoEncontrada(v); return; }
     try { const d = await api('articulo', { id: a0.id }); S.cacheArt[a0.id] = d; if (id !== _navId) return;
       artId = a0.id; meta = { seccion_id: a0.seccion_id, titulo: a0.titulo, resumen: a0.resumen, etiquetas: a0.etiquetas, responsable_email: a0.responsable_email, estado: a0.estado };
-      bloques = conUid(d.bloques);
+      bloques = conUid(d.bloques); baseAct = d.articulo.actualizado_en || '';
     } catch (e) { v.innerHTML = '<div class="vacio"><h2>No se pudo abrir el editor</h2><p>' + esc(e.message) + '</p></div>'; return; }
   }
-  E = { id: artId, meta: meta, bloques: bloques, base: '', prev: true };
+  E = { id: artId, meta: meta, bloques: bloques, base: '', prev: true, baseAct: baseAct };
   E.base = instantanea(); window.__sucio = false;
   pintarEditor(v);
 }
@@ -309,11 +309,21 @@ document.addEventListener('keydown', function (e) {
 });
 
 /* ── Guardar ── */
-async function guardarEditor() {
+async function guardarEditor(forzar) {
   const btn = $('#ed-guardar');
   if (!E.meta.titulo.trim()) { toast('Escribe un título para el artículo.', 'err'); $('#m-titulo').focus(); return; }
   await conBoton(btn, async function () {
-    const r = await api('guardarArticulo', { articulo: Object.assign({ id: E.id }, E.meta), bloques: limpiar(E.bloques), nota: $('#ed-nota').value });
+    let r;
+    try {
+      r = await api('guardarArticulo', { articulo: Object.assign({ id: E.id }, E.meta), bloques: limpiar(E.bloques), nota: $('#ed-nota').value, baseActualizado: E.baseAct, forzar: forzar === true });
+    } catch (e) {
+      const m = /^CONFLICTO\|([^|]*)\|([^|]*)\|(\d+)/.exec(e.message);
+      if (!m) throw e;
+      modal({ titulo: 'Alguien editó este artículo antes que tú', cuerpo: '<p><b>' + esc(m[1]) + '</b> lo guardó el ' + esc(fechaHora(m[2])) + ' (ahora está en la v' + esc(m[3]) + ') mientras tú lo tenías abierto.</p>' +
+        '<p class="suave">Si guardas de todos modos, tu contenido reemplaza al suyo. Su versión no se pierde: queda en el <b>Historial</b> y un administrador puede restaurarla. Para conservar ambos cambios, cancela, copia lo tuyo y vuelve a abrir el artículo.</p>',
+        botones: [{ txt: 'Volver al editor' }, { txt: 'Guardar de todos modos', clase: 'btn-x', onClick: function (c) { c(); guardarEditor(true); } }] });
+      return;
+    }
     delete S.cacheArt[r.id];
     await refrescarCatalogo();
     window.__sucio = false; E.base = instantanea();

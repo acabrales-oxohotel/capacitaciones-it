@@ -114,6 +114,10 @@ function guardarArticulo_(meta, bloques, nota, u, opc) {
       accion = opc.semilla ? 'semilla' : 'crear';
       version = 1;
     } else {
+      // Edición simultánea: si alguien guardó (o cambió el estado) después de que esta persona abrió el artículo, se avisa antes de pisarlo.
+      if (!opc.semilla && !opc.forzar && opc.baseActualizado && String(art.actualizado_en) !== String(opc.baseActualizado)) {
+        throw err_('CONFLICTO|' + nombreDeCorreo_(art.actualizado_por || 'alguien') + '|' + art.actualizado_en + '|' + num_(art.version, 1));
+      }
       estadoAnt = art.estado;
       version = opc.semilla ? num_(art.version, 1) : num_(art.version, 1) + 1;
       const parche = {
@@ -164,7 +168,8 @@ function guardarArticulo_(meta, bloques, nota, u, opc) {
 
 function accGuardarArticulo(p, u) {
   if (!p.articulo) throw err_('Faltan los datos del artículo.');
-  return guardarArticulo_(p.articulo, p.bloques || [], String(p.nota || '').slice(0, 300), u, {});
+  return guardarArticulo_(p.articulo, p.bloques || [], String(p.nota || '').slice(0, 300), u,
+    { baseActualizado: p.baseActualizado || '', forzar: p.forzar === true });
 }
 
 function accCambiarEstado(p, u) {
