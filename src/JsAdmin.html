@@ -1,0 +1,141 @@
+<script>
+/* OxoPedia · Administración: secciones, orden de artículos, usuarios y configuración */
+
+const ICONOS_SUGERIDOS = ['plugs-connected', 'bed', 'desktop-tower', 'hard-drives', 'buildings', 'sparkle', 'code', 'books', 'shield-check', 'wifi-high', 'printer', 'database', 'cloud', 'key', 'wrench', 'lifebuoy', 'lightning', 'globe', 'git-branch', 'robot', 'lightbulb', 'folder'];
+const COLORES_SUGERIDOS = ['#3a6f9a', '#c19528', '#5a7d5f', '#b0613f', '#7a4e73', '#c4526b', '#2b7a78', '#5b6770', '#49677a'];
+
+function vistaAdmin(v, tab) {
+  _navId++;
+  const tabs = [['secciones', 'Secciones'], ['articulos', 'Orden de artículos'], ['usuarios', 'Usuarios'], ['config', 'Configuración']];
+  v.innerHTML = '<div class="migas"><a href="#/">Inicio</a><i class="ph ph-caret-right"></i><span>Gestión</span></div><h1 style="margin-bottom:6px">Gestión de OxoPedia</h1><p class="suave" style="margin-bottom:20px">Crea secciones, ordena el contenido y administra quién puede editar. No hace falta tocar código.</p>' +
+    '<div class="tabs">' + tabs.map(function (t) { return '<a class="tab ' + (t[0] === tab ? 'act' : '') + '" href="#/admin/' + t[0] + '" style="text-decoration:none">' + t[1] + '</a>'; }).join('') + '</div><div id="adm-cont"></div>';
+  const c = $('#adm-cont', v);
+  if (tab === 'secciones') adminSecciones(c);
+  else if (tab === 'articulos') adminArticulos(c);
+  else if (tab === 'usuarios') adminUsuarios(c);
+  else adminConfig(c);
+}
+
+/* ───────── Secciones ───────── */
+function adminSecciones(c) {
+  let filas = '';
+  const fila = function (s, nivel, hermanos, i) {
+    const n = artsDe(s.id).length;
+    return '<tr><td style="padding-left:' + (12 + nivel * 26) + 'px"><span class="punto-sec" style="--c:' + esc(s.color) + ';display:inline-block;margin-right:8px"></span><i class="ph ' + esc(s.icono) + '"></i> <b>' + esc(s.nombre) + '</b></td><td class="suave">' + esc(s.slug) + '</td><td>' + n + '</td><td style="white-space:nowrap">' +
+      '<button class="btn-ico" data-sub="' + s.id + '|-1" ' + (i === 0 ? 'disabled' : '') + ' title="Subir"><i class="ph ph-arrow-up"></i></button><button class="btn-ico" data-sub="' + s.id + '|1" ' + (i === hermanos.length - 1 ? 'disabled' : '') + ' title="Bajar"><i class="ph ph-arrow-down"></i></button>' +
+      '<button class="btn btn-s btn-chico" data-ed="' + s.id + '">Editar</button> <button class="btn btn-t btn-chico" data-del="' + s.id + '" style="color:var(--red)"><i class="ph ph-trash"></i></button></td></tr>';
+  };
+  const rs = raices();
+  rs.forEach(function (s, i) {
+    filas += fila(s, 0, rs, i);
+    const hs = hijosDe(s.id); hs.forEach(function (h, j) { filas += fila(h, 1, hs, j); });
+  });
+  c.innerHTML = '<div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="btn btn-p" id="sec-nueva"><i class="ph ph-plus"></i> Nueva sección</button></div>' +
+    '<table class="admin"><thead><tr><th>Sección</th><th>Identificador</th><th>Artículos</th><th></th></tr></thead><tbody>' + filas + '</tbody></table>';
+  $('#sec-nueva', c).onclick = function () { editarSeccion(null); };
+  $$('[data-ed]', c).forEach(function (b) { b.onclick = function () { editarSeccion(b.dataset.ed); }; });
+  $$('[data-del]', c).forEach(function (b) {
+    b.onclick = async function () {
+      const s = secPorId(b.dataset.del);
+      if (!(await confirmar('Eliminar sección', '«' + s.nombre + '» dejará de mostrarse. Solo se puede si no tiene artículos ni subsecciones.', 'Eliminar', true))) return;
+      try { await api('eliminarSeccion', { id: s.id }); await refrescarCatalogo(); toast('Sección eliminada', 'ok'); navegar(); } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+  $$('[data-sub]', c).forEach(function (b) {
+    b.onclick = async function () {
+      const p = b.dataset.sub.split('|'); const s = secPorId(p[0]); const d = +p[1];
+      const grupo = (s.padre_id ? hijosDe(s.padre_id) : raices()).map(function (x) { return x.id; });
+      const i = grupo.indexOf(s.id); const j = i + d; if (j < 0 || j >= grupo.length) return;
+      grupo.splice(j, 0, grupo.splice(i, 1)[0]);
+      try { await api('ordenarSecciones', { ids: grupo }); await refrescarCatalogo(); navegar(); } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
+function editarSeccion(id) {
+  const s = id ? secPorId(id) : { nombre: '', descripcion: '', icono: 'ph-folder', color: '#49677a', padre_id: '' };
+  const posiblesPadres = raices().filter(function (x) { return x.id !== id; });
+  const tieneHijos = id && hijosDe(id).length > 0;
+  const m = modal({ titulo: id ? 'Editar sección' : 'Nueva sección', cuerpo:
+    '<div class="campo"><label>Nombre</label><input id="sc-nombre" maxlength="80" value="' + esc(s.nombre) + '"></div>' +
+    '<div class="campo"><label>Descripción</label><textarea id="sc-desc" rows="2" maxlength="300">' + esc(s.descripcion) + '</textarea></div>' +
+    '<div class="campo"><label>Sección superior (opcional)</label><select id="sc-padre" ' + (tieneHijos ? 'disabled' : '') + '><option value="">— Es una sección principal —</option>' + posiblesPadres.map(function (p) { return '<option value="' + p.id + '"' + (p.id === s.padre_id ? ' selected' : '') + '>' + esc(p.nombre) + '</option>'; }).join('') + '</select></div>' +
+    '<div class="fila dos"><div class="campo"><label>Color de acento</label><input type="color" id="sc-color" value="' + esc(s.color) + '"><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + COLORES_SUGERIDOS.map(function (c) { return '<button type="button" data-col="' + c + '" style="width:24px;height:24px;border-radius:50%;border:2px solid var(--paper);box-shadow:0 0 0 1px var(--gm);background:' + c + ';cursor:pointer" aria-label="' + c + '"></button>'; }).join('') + '</div></div>' +
+    '<div class="campo"><label>Ícono (Phosphor)</label><input id="sc-icono" value="' + esc(s.icono) + '" placeholder="ph-folder"><div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">' + ICONOS_SUGERIDOS.map(function (i) { return '<button type="button" class="btn-ico" data-ico="ph-' + i + '" title="ph-' + i + '" style="width:30px;height:30px;border:1px solid var(--gl)"><i class="ph ph-' + i + '"></i></button>'; }).join('') + '</div></div></div>' +
+    '<p class="peq suave">Catálogo completo de íconos: phosphoricons.com (usa el nombre con el prefijo «ph-»).</p>',
+  botones: [{ txt: 'Cancelar' }, { txt: 'Guardar', clase: 'btn-p', onClick: function (cerrar, btn) {
+    conBoton(btn, async function () {
+      await api('guardarSeccion', { id: id || '', nombre: $('#sc-nombre', m.el).value, descripcion: $('#sc-desc', m.el).value, padre_id: $('#sc-padre', m.el).value, color: $('#sc-color', m.el).value, icono: $('#sc-icono', m.el).value.trim() });
+      await refrescarCatalogo(); cerrar(); toast('Sección guardada', 'ok'); navegar();
+    });
+  } }] });
+  $$('[data-col]', m.el).forEach(function (b) { b.onclick = function () { $('#sc-color', m.el).value = b.dataset.col; }; });
+  $$('[data-ico]', m.el).forEach(function (b) { b.onclick = function () { $('#sc-icono', m.el).value = b.dataset.ico; }; });
+}
+
+/* ───────── Orden de artículos ───────── */
+function adminArticulos(c) {
+  const opts = S.secciones.map(function (s) { return '<option value="' + s.id + '">' + (s.padre_id ? '&nbsp;&nbsp;↳ ' : '') + esc(s.nombre) + '</option>'; }).join('');
+  c.innerHTML = '<div class="campo" style="max-width:380px;margin-bottom:14px"><label>Sección</label><select id="ord-sec">' + opts + '</select></div><div id="ord-lista"></div>';
+  const pintar = function () {
+    const l = artsDe($('#ord-sec', c).value);
+    $('#ord-lista', c).innerHTML = l.length ? '<table class="admin"><tbody>' + l.map(function (a, i) {
+      return '<tr><td style="width:40px;color:var(--dark)">' + (i + 1) + '</td><td><b>' + esc(a.titulo) + '</b></td><td>' + badgeEstado(a.estado) + '</td><td style="white-space:nowrap;text-align:right"><button class="btn-ico" data-m="' + a.id + '|-1" ' + (i === 0 ? 'disabled' : '') + '><i class="ph ph-arrow-up"></i></button><button class="btn-ico" data-m="' + a.id + '|1" ' + (i === l.length - 1 ? 'disabled' : '') + '><i class="ph ph-arrow-down"></i></button></td></tr>';
+    }).join('') + '</tbody></table>' : '<div class="card plana vacio">Esta sección no tiene artículos.</div>';
+    $$('[data-m]', c).forEach(function (b) {
+      b.onclick = async function () {
+        const p = b.dataset.m.split('|'); const ids = artsDe($('#ord-sec', c).value).map(function (x) { return x.id; });
+        const i = ids.indexOf(p[0]), j = i + +p[1]; if (j < 0 || j >= ids.length) return;
+        ids.splice(j, 0, ids.splice(i, 1)[0]);
+        try { await api('ordenarArticulos', { ids: ids }); await refrescarCatalogo(); pintar(); } catch (e) { toast(e.message, 'err'); }
+      };
+    });
+  };
+  $('#ord-sec', c).onchange = pintar; pintar();
+}
+
+/* ───────── Usuarios ───────── */
+async function adminUsuarios(c) {
+  c.innerHTML = '<div class="esq" style="height:160px"></div>';
+  let l;
+  try { l = await api('usuarios'); } catch (e) { c.innerHTML = '<p>' + esc(e.message) + '</p>'; return; }
+  c.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap"><p class="suave peq" style="max-width:560px">Quien entra con su cuenta del dominio queda como <b>Lector</b> automáticamente. Aquí puedes promover a Administradores o desactivar accesos.</p><button class="btn btn-p" id="us-nuevo"><i class="ph ph-user-plus"></i> Agregar usuario</button></div>' +
+    '<div class="tabla-w"><table class="admin"><thead><tr><th>Usuario</th><th>Rol</th><th>Activo</th><th>Último acceso</th></tr></thead><tbody>' + l.map(function (u) {
+      return '<tr><td><b>' + esc(u.nombre) + '</b><br><span class="suave peq">' + esc(u.email) + '</span></td><td><select data-rol="' + esc(u.email) + '" style="width:auto"><option' + (u.rol === 'Lector' ? ' selected' : '') + '>Lector</option><option' + (u.rol === 'Administrador' ? ' selected' : '') + '>Administrador</option></select></td><td><input type="checkbox" data-act="' + esc(u.email) + '" ' + (u.activo !== 'FALSE' ? 'checked' : '') + '></td><td class="suave">' + (u.ultimo_acceso ? fechaHora(u.ultimo_acceso) : '—') + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  const guardar = async function (email, rol, activo, nombre) {
+    try { await api('guardarUsuario', { email: email, rol: rol, activo: activo, nombre: nombre }); toast('Usuario actualizado', 'ok'); }
+    catch (e) { toast(e.message, 'err'); adminUsuarios(c); }
+  };
+  const datos = function (email) { return l.find(function (u) { return u.email === email; }); };
+  $$('[data-rol]', c).forEach(function (s) { s.onchange = function () { const u = datos(s.dataset.rol); u.rol = s.value; guardar(u.email, s.value, u.activo !== 'FALSE', u.nombre); }; });
+  $$('[data-act]', c).forEach(function (s) { s.onchange = function () { const u = datos(s.dataset.act); u.activo = s.checked ? 'TRUE' : 'FALSE'; guardar(u.email, u.rol, s.checked, u.nombre); }; });
+  $('#us-nuevo', c).onclick = function () {
+    const m = modal({ titulo: 'Agregar usuario', cuerpo: '<div class="campo"><label>Correo corporativo</label><input id="un-email" type="email" placeholder="nombre@oxohotel.com"></div><div class="campo"><label>Nombre</label><input id="un-nombre"></div><div class="campo"><label>Rol</label><select id="un-rol"><option>Lector</option><option>Administrador</option></select></div>',
+      botones: [{ txt: 'Cancelar' }, { txt: 'Agregar', clase: 'btn-p', onClick: function (cerrar, btn) {
+        conBoton(btn, async function () { await api('guardarUsuario', { email: $('#un-email', m.el).value, nombre: $('#un-nombre', m.el).value, rol: $('#un-rol', m.el).value, activo: true }); cerrar(); toast('Usuario agregado', 'ok'); adminUsuarios(c); });
+      } }] });
+  };
+}
+
+/* ───────── Configuración ───────── */
+async function adminConfig(c) {
+  c.innerHTML = '<div class="esq" style="height:160px"></div>';
+  let l;
+  try { l = await api('configuracion'); } catch (e) { c.innerHTML = '<p>' + esc(e.message) + '</p>'; return; }
+  const campo = function (r) {
+    if (r.clave === 'imagenes_modo') return '<select data-cv="' + r.clave + '"><option value="proxy"' + (r.valor === 'proxy' ? ' selected' : '') + '>proxy (repositorio privado)</option><option value="cdn"' + (r.valor === 'cdn' ? ' selected' : '') + '>cdn (repositorio público)</option></select>';
+    if (r.clave === 'auto_registro') return '<select data-cv="' + r.clave + '"><option' + (r.valor === 'SI' ? ' selected' : '') + '>SI</option><option' + (r.valor === 'NO' ? ' selected' : '') + '>NO</option></select>';
+    return '<input data-cv="' + r.clave + '" value="' + esc(r.valor) + '">';
+  };
+  c.innerHTML = '<div class="tabla-w"><table class="admin"><thead><tr><th>Parámetro</th><th>Valor</th><th></th></tr></thead><tbody>' + l.map(function (r) {
+    return '<tr><td style="min-width:220px"><b class="mono" style="font-size:.82rem">' + esc(r.clave) + '</b><br><span class="suave peq">' + esc(r.descripcion) + '</span></td><td style="min-width:240px">' + campo(r) + '</td><td><button class="btn btn-s btn-chico" data-gc="' + r.clave + '">Guardar</button></td></tr>';
+  }).join('') + '</tbody></table></div><p class="peq suave" style="margin-top:12px">Las claves secretas (como el token de GitHub) no se guardan aquí: van en las Propiedades del script de Apps Script.</p>';
+  $$('[data-gc]', c).forEach(function (b) {
+    b.onclick = function () {
+      const k = b.dataset.gc; const el = $('[data-cv="' + k + '"]', c);
+      conBoton(b, async function () { await api('guardarConfig', { clave: k, valor: el.value }); await refrescarCatalogo(); pintarCabecera(); toast('Parámetro guardado', 'ok'); });
+    };
+  });
+}
+</script>

@@ -1,0 +1,161 @@
+<script>
+/* OxoPedia · Render de artículos: texto con formato ligero y todos los tipos de bloque */
+
+function urlSegura(u) { return /^(https?:\/\/|mailto:)/i.test(String(u || '').trim()) ? String(u).trim() : ''; }
+
+/** Formato en línea: `código`, **negrita**, *cursiva*, [texto](https://…) y marcadores [COMPLETAR: …]. */
+function inline(s) {
+  let h = esc(s);
+  const codigos = [];
+  h = h.replace(/`([^`]+)`/g, function (m, c) { codigos.push(c); return '\u0000' + (codigos.length - 1) + '\u0000'; });
+  h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
+  h = h.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  h = h.replace(/\[COMPLETAR:([^\]]*)\]/g, '<mark class="completar">[COMPLETAR:$1]</mark>');
+  return h.replace(/\u0000(\d+)\u0000/g, function (m, i) { return '<code>' + codigos[i] + '</code>'; });
+}
+
+/** Texto en párrafos y listas (- elemento / 1. elemento). */
+function md(txt) {
+  const out = []; let lista = null; let par = [];
+  const cierraP = function () { if (par.length) { out.push('<p>' + par.map(inline).join('<br>') + '</p>'); par = []; } };
+  const cierraL = function () { if (lista) { out.push('<' + lista.t + '>' + lista.items.map(function (i) { return '<li>' + inline(i) + '</li>'; }).join('') + '</' + lista.t + '>'); lista = null; } };
+  String(txt || '').replace(/\r/g, '').split('\n').forEach(function (l) {
+    let m;
+    if ((m = /^\s*[-*]\s+(.*)$/.exec(l))) { cierraP(); if (!lista || lista.t !== 'ul') { cierraL(); lista = { t: 'ul', items: [] }; } lista.items.push(m[1]); }
+    else if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(l))) { cierraP(); if (!lista || lista.t !== 'ol') { cierraL(); lista = { t: 'ol', items: [] }; } lista.items.push(m[1]); }
+    else if (!l.trim()) { cierraP(); cierraL(); }
+    else { cierraL(); par.push(l); }
+  });
+  cierraP(); cierraL();
+  return out.join('');
+}
+
+const ICONO_ALERTA = { nota: 'info', advertencia: 'warning', importante: 'warning-octagon' };
+const ROTULO_ALERTA = { nota: 'Nota', advertencia: 'Advertencia', importante: 'Importante' };
+
+function iconoEnlace(url) {
+  if (/^https:\/\/(drive|docs)\.google\.com\/.*\/folders\//.test(url)) return 'folder-open';
+  if (/^https:\/\/(drive|docs)\.google\.com\//.test(url)) return 'google-drive-logo';
+  if (/^mailto:/.test(url)) return 'envelope-simple';
+  return 'link-simple';
+}
+
+function tamanoLegible(kb) { return kb >= 1024 ? (kb / 1024).toFixed(1).replace('.', ',') + ' MB' : kb + ' KB'; }
+
+function renderBloque(b, ctx) {
+  const c = b.config || {};
+  switch (b.tipo) {
+    case 'titulo': {
+      const nivel = c.nivel === 3 || c.nivel === '3' ? 3 : 2;
+      const id = 'h-' + (ctx.n = (ctx.n || 0) + 1);
+      if (ctx.toc) ctx.toc.push({ id: id, txt: b.contenido, nivel: nivel });
+      return '<h' + nivel + ' id="' + id + '">' + inline(b.contenido) + '</h' + nivel + '>';
+    }
+    case 'texto': return '<div class="txt">' + md(b.contenido) + '</div>';
+    case 'imagen': {
+      if (!c.ruta) return '<div class="alerta nota"><i class="ph ph-image"></i><div>Imagen pendiente de subir.</div></div>';
+      return '<figure class="fig"><div class="marco"><img class="zoom" data-ruta="' + esc(c.ruta) + '" alt="' + esc(c.alt || '') + '"><span class="cargando"><i class="ph ph-circle-notch girar"></i></span></div>' + (c.pie ? '<figcaption>' + inline(c.pie) + '</figcaption>' : '') + '</figure>';
+    }
+    case 'codigo':
+      return '<div class="codigo"><header><span>' + esc(c.lenguaje || 'texto') + '</span><button class="copiar" type="button"><i class="ph ph-copy"></i> Copiar</button></header><pre><code>' + esc(b.contenido) + '</code></pre></div>';
+    case 'alerta': {
+      const n = ICONO_ALERTA[c.nivel] ? c.nivel : 'nota';
+      return '<div class="alerta ' + n + '"><i class="ph ph-' + ICONO_ALERTA[n] + '"></i><div><b class="t">' + ROTULO_ALERTA[n] + '</b><div class="txt">' + md(b.contenido) + '</div></div></div>';
+    }
+    case 'enlace': {
+      const u = urlSegura(c.url);
+      if (!u) return '<div class="alerta advertencia"><i class="ph ph-warning"></i><div>Enlace pendiente o no válido (debe empezar por https://).</div></div>';
+      return '<a class="enlace" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer"><span class="ico"><i class="ph ph-' + iconoEnlace(u) + '"></i></span><span><b>' + esc(c.titulo || u) + '</b>' + (c.descripcion ? '<small style="word-break:normal">' + esc(c.descripcion) + '</small>' : '') + '<small>' + esc(u.replace(/^https?:\/\//, '').slice(0, 80)) + '</small></span><i class="ph ph-arrow-up-right"></i></a>';
+    }
+    case 'adjunto':
+      if (!c.recurso_id) return '<div class="alerta nota"><i class="ph ph-paperclip"></i><div>Adjunto pendiente de subir.</div></div>';
+      return '<button type="button" class="enlace adjunto" data-rec="' + esc(c.recurso_id) + '"><span class="ico"><i class="ph ph-paperclip"></i></span><span><b>' + esc(c.nombre || 'Archivo adjunto') + '</b><small>' + (c.tamano_kb ? tamanoLegible(c.tamano_kb) + ' · ' : '') + 'Clic para descargar</small></span><i class="ph ph-download-simple"></i></button>';
+    case 'checklist': {
+      const items = String(b.contenido || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean);
+      const base = 'oxo-ck-' + (ctx.artId || 'x') + '-' + (ctx.n = (ctx.n || 0) + 1);
+      return '<ul class="checklist">' + items.map(function (t, i) {
+        let marcado = false; try { marcado = localStorage.getItem(base + '-' + i) === '1'; } catch (e) { /* sin almacenamiento */ }
+        return '<li><label><input type="checkbox" data-k="' + base + '-' + i + '"' + (marcado ? ' checked' : '') + '><span>' + inline(t) + '</span></label></li>';
+      }).join('') + '</ul>';
+    }
+    case 'tabla': {
+      const filas = String(b.contenido || '').split('\n').filter(function (l) { return l.trim(); }).map(function (l) { return l.split('|').map(function (x) { return x.trim(); }); });
+      if (!filas.length) return '';
+      return '<div class="tabla-w"><table class="tabla"><thead><tr>' + filas[0].map(function (x) { return '<th>' + inline(x) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        filas.slice(1).map(function (f) { return '<tr>' + f.map(function (x) { return '<td>' + inline(x) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+    }
+    case 'desplegable':
+      return '<details class="desp"><summary>' + inline(c.titulo || 'Detalle') + '</summary><div class="desp-c txt">' + md(b.contenido) + '</div></details>';
+    case 'separador': return '<hr class="sep">';
+    default: return '';
+  }
+}
+
+/** Convierte la lista de bloques en HTML. ctx = { artId, toc: [] } (toc se va llenando con los títulos). */
+function renderBloques(bloques, ctx) {
+  ctx = ctx || {};
+  let h = '', n = 0;
+  (bloques || []).forEach(function (b) {
+    if (b.tipo === 'titulo') n = 0;
+    if (b.tipo === 'paso') {
+      n++;
+      h += '<div class="paso"><div class="num">' + n + '</div><div class="cont"><div class="txt">' + md(b.contenido) + '</div>' +
+        (b.hijos || []).map(function (x) { return renderBloque(x, ctx); }).join('') + '</div></div>';
+    } else h += renderBloque(b, ctx);
+  });
+  return h;
+}
+
+/* ── Imágenes (repositorio de GitHub: CDN o proxy) ── */
+const _imgProm = {};
+function resolverImagen(ruta) {
+  if (S.imgs[ruta]) return Promise.resolve(S.imgs[ruta]);
+  if (!_imgProm[ruta]) {
+    _imgProm[ruta] = api('imagen', { ruta: ruta }).then(function (r) { return (S.imgs[ruta] = 'data:' + r.mime + ';base64,' + r.base64); })
+      .catch(function (e) { delete _imgProm[ruta]; throw e; });
+  }
+  return _imgProm[ruta];
+}
+
+function cargarImagenes(raiz) {
+  $$('img[data-ruta]', raiz).forEach(function (img) {
+    const ruta = img.dataset.ruta;
+    const quitar = function () { const s = img.parentNode && $('.cargando', img.parentNode); if (s) s.remove(); };
+    const fallo = function (msg) { quitar(); img.replaceWith(Object.assign(document.createElement('div'), { className: 'alerta advertencia', innerHTML: '<i class="ph ph-image-broken"></i><div>No se pudo cargar la imagen. ' + esc(msg || '') + '</div>' })); };
+    img.addEventListener('load', quitar, { once: true });
+    if (S.imgs[ruta]) { img.src = S.imgs[ruta]; return; }
+    if (S.cfg.imagenes_modo === 'cdn') {
+      img.addEventListener('error', function () { resolverImagen(ruta).then(function (u) { img.src = u; }).catch(function (e) { fallo(e.message); }); }, { once: true });
+      img.src = S.cfg.cdn_base + ruta;
+    } else resolverImagen(ruta).then(function (u) { img.src = u; }).catch(function (e) { fallo(e.message); });
+  });
+}
+
+/* ── Eventos globales de los bloques ── */
+document.addEventListener('click', function (e) {
+  const cop = e.target.closest('.copiar');
+  if (cop) {
+    const pre = cop.closest('.codigo').querySelector('pre');
+    copiarTexto(pre.innerText).then(function (ok) {
+      const ant = cop.innerHTML; cop.classList.toggle('ok', ok); cop.innerHTML = ok ? '<i class="ph ph-check"></i> Copiado' : 'No se pudo copiar';
+      setTimeout(function () { cop.innerHTML = ant; cop.classList.remove('ok'); }, 1600);
+    });
+    return;
+  }
+  const adj = e.target.closest('.adjunto');
+  if (adj && adj.dataset.rec) {
+    adj.disabled = true;
+    api('descargarAdjunto', { id: adj.dataset.rec }).then(function (r) { descargarBase64(r.nombre, r.mime, r.base64); })
+      .catch(function (er) { toast(er.message, 'err'); }).then(function () { adj.disabled = false; });
+    return;
+  }
+  const im = e.target.closest('img.zoom');
+  if (im && im.src) {
+    const lb = document.createElement('div'); lb.className = 'lightbox'; lb.innerHTML = '<img alt="">'; lb.firstChild.src = im.src; lb.firstChild.alt = im.alt;
+    lb.onclick = function () { lb.remove(); }; document.body.appendChild(lb);
+  }
+});
+document.addEventListener('change', function (e) {
+  if (e.target.matches('.checklist input[data-k]')) { try { localStorage.setItem(e.target.dataset.k, e.target.checked ? '1' : '0'); } catch (er) { /* sin almacenamiento */ } }
+});
+</script>

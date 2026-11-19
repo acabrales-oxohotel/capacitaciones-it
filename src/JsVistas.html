@@ -1,0 +1,296 @@
+<script>
+/* OxoPedia · Vistas de lectura: buscador, inicio, sección y artículo */
+
+let _navId = 0;
+
+/* ───────── Buscador global ───────── */
+const _normChars = function (s) { return Array.from(String(s)).map(function (c) { return (c.normalize('NFD').replace(/[̀-ͯ]/g, '')[0] || c); }).join('').toLowerCase(); };
+
+function resaltar(texto, terms) {
+  const n = _normChars(texto); const marcas = new Array(texto.length).fill(false);
+  terms.forEach(function (t) { if (!t) return; let i = n.indexOf(t); while (i >= 0) { for (let k = i; k < i + t.length; k++) marcas[k] = true; i = n.indexOf(t, i + t.length); } });
+  let h = '', abierto = false;
+  for (let i = 0; i < texto.length; i++) {
+    if (marcas[i] && !abierto) { h += '<mark>'; abierto = true; } else if (!marcas[i] && abierto) { h += '</mark>'; abierto = false; }
+    h += esc(texto[i]);
+  }
+  return h + (abierto ? '</mark>' : '');
+}
+
+async function cargarIndice() {
+  if (S.indice) return S.indice;
+  const l = await api('indice');
+  S.indice = {}; l.forEach(function (x) { S.indice[x.id] = { raw: x.t || '', n: _normChars(x.t || '') }; });
+  return S.indice;
+}
+
+function buscar(q) {
+  const terms = _normChars(q).split(/\s+/).filter(Boolean);
+  if (!terms.length) return { terms: terms, res: [] };
+  const res = [];
+  S.articulos.forEach(function (a) {
+    const ti = _normChars(a.titulo), et = _normChars(a.etiquetas), re = _normChars(a.resumen), cu = S.indice && S.indice[a.id] ? S.indice[a.id].n : '';
+    let score = 0;
+    for (let i = 0; i < terms.length; i++) {
+      const t = terms[i]; let ok = false;
+      if (ti.indexOf(t) >= 0) { score += 10; ok = true; }
+      if (et.indexOf(t) >= 0) { score += 5; ok = true; }
+      if (re.indexOf(t) >= 0) { score += 3; ok = true; }
+      if (cu.indexOf(t) >= 0) { score += 1; ok = true; }
+      if (!ok) return;
+    }
+    res.push({ a: a, score: score });
+  });
+  res.sort(function (x, y) { return y.score - x.score || x.a.titulo.localeCompare(y.a.titulo); });
+  return { terms: terms, res: res };
+}
+
+function fragmento(artId, terms) {
+  const e = S.indice && S.indice[artId]; if (!e) return '';
+  let pos = -1;
+  for (let i = 0; i < terms.length && pos < 0; i++) pos = e.n.indexOf(terms[i]);
+  if (pos < 0) return '';
+  const ini = Math.max(0, pos - 70), fin = Math.min(e.raw.length, pos + 150);
+  return (ini > 0 ? '…' : '') + resaltar(e.raw.slice(ini, fin), terms) + (fin < e.raw.length ? '…' : '');
+}
+
+function prepararBuscador() {
+  const q = $('#q'), sug = $('#sugerencias');
+  let sel = -1, lista = [];
+  const cerrar = function () { sug.hidden = true; sel = -1; };
+  const pintar = function () {
+    const r = buscar(q.value);
+    lista = r.res.slice(0, 6);
+    if (!q.value.trim()) { cerrar(); return; }
+    sug.innerHTML = lista.length ? lista.map(function (x, i) {
+      const s = secPorId(x.a.seccion_id);
+      return '<a href="' + rutaArt(x.a) + '" class="' + (i === sel ? 'sel' : '') + '"><span>' + resaltar(x.a.titulo, r.terms) + '</span><small>' + esc(s ? s.nombre : '') + ' · ' + esc(x.a.estado) + '</small></a>';
+    }).join('') + '<a href="#/buscar?q=' + encodeURIComponent(q.value.trim()) + '"><small>Ver todos los resultados para «' + esc(q.value.trim()) + '»</small></a>'
+      : '<a href="#/buscar?q=' + encodeURIComponent(q.value.trim()) + '"><span>Sin coincidencias en títulos</span><small>Buscar también dentro del contenido</small></a>';
+    sug.hidden = false;
+  };
+  q.addEventListener('focus', function () { cargarIndice().then(function () { if (q.value) pintar(); }).catch(function () { /* se busca sin contenido */ }); });
+  q.addEventListener('input', pintar);
+  q.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown' && lista.length) { e.preventDefault(); sel = (sel + 1) % lista.length; pintar(); }
+    else if (e.key === 'ArrowUp' && lista.length) { e.preventDefault(); sel = (sel - 1 + lista.length) % lista.length; pintar(); }
+    else if (e.key === 'Enter') { e.preventDefault(); const v = q.value.trim(); cerrar(); if (sel >= 0 && lista[sel]) ir(rutaArt(lista[sel].a)); else if (v) ir('#/buscar?q=' + encodeURIComponent(v)); }
+    else if (e.key === 'Escape') { cerrar(); q.blur(); }
+  });
+  document.addEventListener('click', function (e) { if (!e.target.closest('#buscador')) cerrar(); else if (e.target.closest('.sugerencias a')) setTimeout(cerrar, 0); });
+  document.addEventListener('keydown', function (e) {
+    const enCampo = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '');
+    if ((e.key === '/' && !enCampo) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k')) { e.preventDefault(); q.focus(); q.select(); }
+  });
+}
+
+async function vistaBusqueda(v, texto) {
+  const id = ++_navId;
+  $('#q').value = texto;
+  v.innerHTML = '<div class="migas"><a href="#/">Inicio</a><i class="ph ph-caret-right"></i><span>Búsqueda</span></div><h1>Resultados</h1><p class="suave" style="margin:6px 0 20px">Buscando «' + esc(texto) + '»…</p>';
+  try { await cargarIndice(); } catch (e) { /* se busca con lo disponible */ }
+  if (id !== _navId) return;
+  const r = buscar(texto);
+  v.innerHTML = '<div class="migas"><a href="#/">Inicio</a><i class="ph ph-caret-right"></i><span>Búsqueda</span></div><h1>Resultados</h1><p class="suave" style="margin:6px 0 20px">' +
+    (r.res.length ? r.res.length + (r.res.length === 1 ? ' artículo encontrado' : ' artículos encontrados') + ' para «' + esc(texto) + '»' : 'No hay resultados para «' + esc(texto) + '».') + '</p>' +
+    (r.res.length ? '<div class="res">' + r.res.map(function (x) {
+      const s = secPorId(x.a.seccion_id); const fr = fragmento(x.a.id, r.terms);
+      return '<a class="res-i" href="' + rutaArt(x.a) + '" style="--c:' + esc(colorDe(x.a.seccion_id)) + '"><b>' + resaltar(x.a.titulo, r.terms) + '</b> ' + badgeEstado(x.a.estado) +
+        '<p>' + (fr || resaltar(x.a.resumen || '', r.terms)) + '</p><small>' + esc(s ? (raizDe(s).nombre + (s.padre_id ? ' › ' + s.nombre : '')) : '') + ' · ' + esc(nombreDe(x.a.responsable_email)) + '</small></a>';
+    }).join('') + '</div>' : '<div class="vacio"><i class="ph ph-magnifying-glass"></i>Prueba con otras palabras, una etiqueta o el nombre de la herramienta.</div>');
+}
+
+/* ───────── Inicio ───────── */
+function itemLista(a, extra) {
+  const s = secPorId(a.seccion_id);
+  return '<a class="item-art" href="' + rutaArt(a) + '"><span class="punto-sec" style="--c:' + esc(colorDe(a.seccion_id)) + '"></span><span class="t"><b>' + esc(a.titulo) + '</b><small>' + esc(s ? s.nombre : '') + (extra ? ' · ' + extra : '') + '</small></span>' + badgeEstado(a.estado) + '</a>';
+}
+
+function vistaInicio(v) {
+  _navId++;
+  const total = S.articulos.length;
+  const cuenta = function (e) { return S.articulos.filter(function (a) { return a.estado === e; }).length; };
+  const val = cuenta('Validado');
+  const pct = total ? Math.round(val * 100 / total) : 0;
+  const recientes = S.articulos.slice().sort(function (a, b) { return a.actualizado_en < b.actualizado_en ? 1 : -1; }).slice(0, 7);
+  const pendientes = S.articulos.filter(function (a) { return a.estado !== 'Validado'; }).sort(function (a, b) { return (a.estado === b.estado ? 0 : (a.estado === 'En revisión' ? -1 : 1)) || (a.actualizado_en < b.actualizado_en ? 1 : -1); }).slice(0, 7);
+  const vencidos = S.articulos.filter(porRevisar);
+  const nombre = (S.user.nombre || '').split(' ')[0];
+
+  let h = '<section class="hero"><span class="etq">Conocimiento de TI · OxoHotel</span><h1>Hola, ' + esc(nombre) + '. <span>¿Qué necesitas resolver hoy?</span></h1>' +
+    '<p>Procedimientos de soporte y desarrollo, de punta a punta. Úsalo para capacitarte o como manual de consulta diaria.</p>' +
+    '<div class="buscador-grande"><i class="ph ph-magnifying-glass"></i><input id="q-home" type="search" placeholder="Busca un procedimiento, herramienta o error…" autocomplete="off"></div></section>';
+  h += '<div class="kpis">' +
+    '<div class="kpi"><div class="n">' + total + '</div><div class="l">Artículos</div></div>' +
+    '<div class="kpi verde"><div class="n">' + pct + '<sup>%</sup></div><div class="l">Validados (' + val + ')</div></div>' +
+    '<div class="kpi"><div class="n">' + cuenta('En revisión') + '</div><div class="l">En revisión</div></div>' +
+    '<div class="kpi oro"><div class="n">' + cuenta('Borrador') + '</div><div class="l">Borradores</div></div></div>';
+
+  h += '<div class="sec-t"><h2>Accesos rápidos</h2>' + (esAdmin() ? '<a class="btn btn-t btn-chico" href="#/admin/secciones"><i class="ph ph-plus"></i> Gestionar secciones</a>' : '') + '</div><div class="grid-sec">';
+  raices().forEach(function (s) {
+    const n = artsDeArbol(s).length;
+    h += '<a class="tarjeta-sec" href="' + rutaSec(s) + '" style="--acc:' + esc(s.color) + '"><span class="ico"><i class="ph ' + esc(s.icono) + '"></i></span><h3>' + esc(s.nombre) + '</h3><p>' + esc(s.descripcion) + '</p><span class="pie"><span>' + n + (n === 1 ? ' artículo' : ' artículos') + '</span><i class="ph ph-arrow-right"></i></span></a>';
+  });
+  h += '</div>';
+
+  h += '<div class="dos-col" style="margin-top:30px"><div><div class="sec-t" style="margin-top:0"><h2>Pendientes de validar</h2><span class="etq">' + (total - val) + ' en total</span></div><div class="card plana lista-art" style="--acc:#c19528">' +
+    (pendientes.length ? pendientes.map(function (a) { return itemLista(a); }).join('') : '<div class="vacio"><i class="ph ph-seal-check"></i>Todo está validado.</div>') + '</div></div>' +
+    '<div><div class="sec-t" style="margin-top:0"><h2>Actualizados recientemente</h2></div><div class="card plana lista-art">' +
+    (recientes.length ? recientes.map(function (a) { return itemLista(a, fechaCorta(a.actualizado_en)); }).join('') : '<div class="vacio">Aún no hay artículos.</div>') + '</div></div></div>';
+
+  if (vencidos.length) {
+    h += '<div class="sec-t"><h2>Por revisar</h2><span class="etq">Más de ' + S.cfg.dias_para_revisar + ' días sin revisión</span></div><div class="card plana lista-art">' +
+      vencidos.map(function (a) { return itemLista(a, 'revisado ' + fechaCorta(a.fecha_revision)); }).join('') + '</div>';
+  }
+  v.innerHTML = h;
+  const qh = $('#q-home', v);
+  qh.addEventListener('keydown', function (e) { if (e.key === 'Enter' && qh.value.trim()) ir('#/buscar?q=' + encodeURIComponent(qh.value.trim())); });
+}
+
+/* ───────── Sección ───────── */
+function tarjetaArt(a) {
+  return '<a class="tarjeta-art" href="' + rutaArt(a) + '" style="--acc:' + esc(colorDe(a.seccion_id)) + '"><h3>' + esc(a.titulo) + '</h3><p>' + esc(a.resumen) + '</p><div class="meta">' + badgeEstado(a.estado) + '<span><i class="ph ph-clock"></i> ' + a.tiempo_lectura_min + ' min</span></div></a>';
+}
+
+function vistaSeccion(v, slug) {
+  _navId++;
+  const s = secPorSlug(slug);
+  if (!s) { vistaNoEncontrada(v); return; }
+  const padre = s.padre_id ? secPorId(s.padre_id) : null;
+  let h = '<div class="migas"><a href="#/">Inicio</a><i class="ph ph-caret-right"></i>' + (padre ? '<a href="' + rutaSec(padre) + '">' + esc(padre.nombre) + '</a><i class="ph ph-caret-right"></i>' : '') + '<span>' + esc(s.nombre) + '</span></div>';
+  h += '<div style="--acc:' + esc(s.color) + '"><div class="cab-sec"><span class="ico"><i class="ph ' + esc(s.icono) + '"></i></span><div style="flex:1"><span class="etq" style="color:var(--acc)">Sección</span><h1>' + esc(s.nombre) + '</h1><p>' + esc(s.descripcion) + '</p></div>' +
+    (esAdmin() ? '<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn btn-p" href="#/nuevo/' + encodeURIComponent(s.slug) + '"><i class="ph ph-plus"></i> Nuevo artículo</a><button class="btn btn-s" id="ed-sec"><i class="ph ph-pencil-simple"></i> Editar sección</button></div>' : '') + '</div>';
+  const directos = artsDe(s.id);
+  const subs = hijosDe(s.id);
+  if (directos.length) h += '<div class="grid-art">' + directos.map(tarjetaArt).join('') + '</div>';
+  subs.forEach(function (sub) {
+    const l = artsDe(sub.id);
+    h += '<div class="sec-t"><h2><a href="' + rutaSec(sub) + '" style="color:inherit;text-decoration:none">' + esc(sub.nombre) + '</a></h2><span class="etq" style="color:var(--acc)">' + l.length + (l.length === 1 ? ' artículo' : ' artículos') + '</span></div>' +
+      (l.length ? '<div class="grid-art">' + l.map(tarjetaArt).join('') + '</div>' : '<div class="card plana vacio">Sin artículos todavía.</div>');
+  });
+  if (!directos.length && !subs.length) h += '<div class="card plana vacio"><i class="ph ph-file-dashed"></i>Esta sección aún no tiene artículos.' + (esAdmin() ? '<p style="margin-top:12px"><a class="btn btn-p" href="#/nuevo/' + encodeURIComponent(s.slug) + '">Crear el primero</a></p>' : '') + '</div>';
+  h += '</div>';
+  v.innerHTML = h;
+  const b = $('#ed-sec', v); if (b) b.onclick = function () { editarSeccion(s.id); };
+}
+
+/* ───────── Artículo ───────── */
+function vistaArtEsqueleto(v) {
+  v.innerHTML = '<div class="esq" style="height:14px;width:240px;margin-bottom:22px"></div><div class="esq" style="height:38px;width:70%;margin-bottom:16px"></div><div class="esq" style="height:80px;margin-bottom:20px"></div><div class="esq" style="height:340px"></div>';
+}
+
+async function vistaArticulo(v, slug) {
+  const id = ++_navId;
+  const a0 = artPorSlug(slug);
+  if (!a0) { vistaNoEncontrada(v); return; }
+  vistaArtEsqueleto(v);
+  let d = S.cacheArt[a0.id];
+  try { if (!d) { d = await api('articulo', { id: a0.id }); S.cacheArt[a0.id] = d; } }
+  catch (e) { if (id === _navId) v.innerHTML = '<div class="vacio"><i class="ph ph-warning-circle"></i><h2>No pudimos abrir el artículo</h2><p class="suave">' + esc(e.message) + '</p><p><a class="btn btn-p" href="#/">Ir al inicio</a></p></div>'; return; }
+  if (id !== _navId) return;
+  pintarArticulo(v, a0.id);
+}
+
+function pintarArticulo(v, artId) {
+  const d = S.cacheArt[artId];
+  const a = S.articulos.find(function (x) { return x.id === artId; }) || d.articulo;
+  const s = secPorId(a.seccion_id) || { nombre: '', color: '#49677a', slug: '' };
+  const padre = s.padre_id ? secPorId(s.padre_id) : null;
+  const ctx = { artId: a.id, toc: [] };
+  const cuerpo = renderBloques(d.bloques, ctx);
+  const hermanos = artsDe(a.seccion_id);
+  const pos = hermanos.findIndex(function (x) { return x.id === a.id; });
+  const ant = pos > 0 ? hermanos[pos - 1] : null, sig = pos >= 0 && pos < hermanos.length - 1 ? hermanos[pos + 1] : null;
+  const rev = porRevisar(a);
+  const dias = diasDesde(a.fecha_revision);
+  const etiquetas = String(a.etiquetas || '').split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+  const pendientes = (cuerpo.match(/class="completar"/g) || []).length;
+
+  let h = '<div style="--acc:' + esc(s.color) + '">';
+  h += '<div class="migas"><a href="#/">Inicio</a><i class="ph ph-caret-right"></i>' + (padre ? '<a href="' + rutaSec(padre) + '">' + esc(padre.nombre) + '</a><i class="ph ph-caret-right"></i>' : '') + '<a href="' + rutaSec(s) + '">' + esc(s.nombre) + '</a><i class="ph ph-caret-right"></i><span>' + esc(a.titulo) + '</span></div>';
+  h += '<div class="art-layout"><article>';
+  h += '<div class="art-cab"><span class="etq">' + esc(padre ? padre.nombre + ' · ' + s.nombre : s.nombre) + '</span><h1>' + esc(a.titulo) + '</h1>' + (a.resumen ? '<p class="art-resumen">' + esc(a.resumen) + '</p>' : '') + '</div>';
+  h += '<div class="meta-grid"><div><span>Estado</span>' + badgeEstado(a.estado) + '</div><div><span>Responsable</span><b>' + esc(nombreDe(a.responsable_email)) + '</b></div>' +
+    '<div><span>Creado</span><b>' + fechaCorta(a.fecha_creacion) + '</b></div>' +
+    '<div><span>Última revisión</span><b class="' + (rev ? 'por-revisar' : '') + '">' + (a.fecha_revision ? fechaCorta(a.fecha_revision) + (rev ? ' · por revisar' : '') : 'Sin revisar') + '</b></div>' +
+    '<div><span>Versión</span><b>v' + a.version + '</b></div><div><span>Lectura</span><b>' + a.tiempo_lectura_min + ' min</b></div></div>';
+  if (etiquetas.length) h += '<div class="etiquetas">' + etiquetas.map(function (t) { return '<a class="chip" href="#/buscar?q=' + encodeURIComponent(t) + '"><i class="ph ph-tag"></i>' + esc(t) + '</a>'; }).join('') + '</div>';
+  if (a.estado !== 'Validado' && pendientes) h += '<div class="alerta advertencia" style="margin-top:10px"><i class="ph ph-warning"></i><div>Este borrador tiene <b>' + pendientes + '</b> dato(s) por completar (resaltados como <mark class="completar">[COMPLETAR]</mark>).</div></div>';
+  h += '<div class="acciones"><button class="btn btn-s btn-chico" id="a-copiar"><i class="ph ph-link-simple"></i> Copiar enlace</button><button class="btn btn-s btn-chico" id="a-imprimir"><i class="ph ph-printer"></i> Imprimir</button><button class="btn btn-s btn-chico" id="a-hist"><i class="ph ph-clock-counter-clockwise"></i> Historial</button>';
+  if (esAdmin()) h += '<span style="flex:1"></span><button class="btn btn-s btn-chico" id="a-estado"><i class="ph ph-seal-check"></i> Cambiar estado</button><button class="btn btn-s btn-chico" id="a-rev"><i class="ph ph-check-circle"></i> Marcar como revisado</button><a class="btn btn-p btn-chico" href="#/editar/' + a.id + '"><i class="ph ph-pencil-simple"></i> Editar</a><button class="btn btn-t btn-chico" id="a-elim" style="color:var(--red)"><i class="ph ph-trash"></i></button>';
+  h += '</div>';
+  h += '<div class="cuerpo-art" id="cuerpo-art">' + (cuerpo || '<div class="vacio">Este artículo aún no tiene contenido.</div>') + '</div>';
+  h += '<div class="nav-pie">' + (ant ? '<a href="' + rutaArt(ant) + '"><small>← Anterior</small>' + esc(ant.titulo) + '</a>' : '<span></span>') + (sig ? '<a class="sig" href="' + rutaArt(sig) + '"><small>Siguiente →</small>' + esc(sig.titulo) + '</a>' : '<span></span>') + '</div>';
+  h += '</article>';
+  h += '<aside class="toc">' + (ctx.toc.length > 1 ? '<span class="etq">En esta página</span>' + ctx.toc.map(function (t) { return '<a class="' + (t.nivel === 3 ? 'n3' : '') + '" href="#" data-h="' + t.id + '">' + esc(t.txt) + '</a>'; }).join('') : '') + '</aside>';
+  h += '</div></div>';
+  v.innerHTML = h;
+  cargarImagenes(v);
+
+  // Índice lateral: desplazamiento suave y resaltado del apartado visible (sin tocar el hash de la ruta)
+  const enlaces = $$('.toc a[data-h]', v);
+  enlaces.forEach(function (l) { l.addEventListener('click', function (e) { e.preventDefault(); const t = document.getElementById(l.dataset.h); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }); });
+  if (enlaces.length && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver(function (es) { es.forEach(function (en) { if (en.isIntersecting) enlaces.forEach(function (l) { l.classList.toggle('act', l.dataset.h === en.target.id); }); }); }, { rootMargin: '-80px 0px -70% 0px' });
+    ctx.toc.forEach(function (t) { const el = document.getElementById(t.id); if (el) io.observe(el); });
+  }
+
+  $('#a-copiar', v).onclick = function () {
+    const url = (S.cfg.url_app ? S.cfg.url_app + '?a=' + encodeURIComponent(a.slug) : location.href);
+    copiarTexto(url).then(function (ok) { toast(ok ? 'Enlace copiado' : 'No se pudo copiar el enlace', ok ? 'ok' : 'err'); });
+  };
+  $('#a-imprimir', v).onclick = function () { $$('details.desp').forEach(function (x) { x.open = true; }); window.print(); };
+  $('#a-hist', v).onclick = function () { verHistorial(a.id); };
+  if (esAdmin()) {
+    $('#a-estado', v).onclick = function () { cambiarEstadoUI(a); };
+    $('#a-rev', v).onclick = async function (e) {
+      await conBoton(e.currentTarget, async function () { await api('marcarRevisado', { id: a.id }); await refrescarCatalogo(); toast('Marcado como revisado', 'ok'); pintarArticulo(v, a.id); });
+    };
+    $('#a-elim', v).onclick = async function () {
+      if (!(await confirmar('Eliminar artículo', '«' + a.titulo + '» dejará de mostrarse. Se conserva en la hoja de cálculo (activo = FALSE) y en el historial.', 'Eliminar', true))) return;
+      try { await api('eliminarArticulo', { id: a.id }); await refrescarCatalogo(); toast('Artículo eliminado', 'ok'); ir('#/s/' + encodeURIComponent(s.slug)); } catch (e) { toast(e.message, 'err'); }
+    };
+  }
+}
+
+function cambiarEstadoUI(a) {
+  const m = modal({ titulo: 'Cambiar estado', cuerpo:
+    '<div class="campo"><label>Estado</label><select id="ce-estado"><option>Borrador</option><option>En revisión</option><option>Validado</option></select></div>' +
+    '<div class="campo"><label>Nota (opcional)</label><input id="ce-nota" maxlength="200" placeholder="Ej.: probado en el hotel X"></div>' +
+    '<p class="peq suave">Al pasar a «Validado» se registra la fecha de revisión y quién validó.</p>',
+  botones: [{ txt: 'Cancelar' }, { txt: 'Guardar', clase: 'btn-p', onClick: function (cerrar, btn) {
+    conBoton(btn, async function () {
+      await api('cambiarEstado', { id: a.id, estado: $('#ce-estado', m.el).value, nota: $('#ce-nota', m.el).value });
+      await refrescarCatalogo(); cerrar(); toast('Estado actualizado', 'ok'); pintarArticulo($('#vista'), a.id);
+    });
+  } }] });
+  $('#ce-estado', m.el).value = a.estado;
+}
+
+const ROTULO_ACCION = { crear: 'Creado', editar: 'Editado', estado: 'Cambio de estado', revisar: 'Revisado', restaurar: 'Restaurado', eliminar: 'Eliminado', semilla: 'Borrador inicial' };
+
+async function verHistorial(artId) {
+  const m = modal({ titulo: 'Historial de cambios', ancho: true, cuerpo: '<div class="esq" style="height:120px"></div>' });
+  try {
+    const l = await api('historial', { articulo_id: artId });
+    $('.cuerpo', m.el).innerHTML = l.length ? '<div class="hist">' + l.map(function (x) {
+      return '<div class="hist-i"><div class="f">' + fechaHora(x.fecha) + '</div><div><b>' + esc(ROTULO_ACCION[x.accion] || x.accion) + '</b> · v' + x.version + ' · ' + esc(x.usuario === 'semilla' ? 'Sistema' : nombreDe(x.usuario)) +
+        (x.estado_anterior !== x.estado_nuevo && x.estado_nuevo ? '<br><span class="suave peq">Estado: ' + esc(x.estado_anterior || '—') + ' → ' + esc(x.estado_nuevo) + '</span>' : '') +
+        (x.resumen ? '<br><span class="suave peq">' + esc(x.resumen) + '</span>' : '') + '</div><div>' +
+        (esAdmin() && x.tiene_copia ? '<button class="btn btn-s btn-chico" data-ver="' + x.id + '">Ver</button> <button class="btn btn-t btn-chico" data-res="' + x.id + '">Restaurar</button>' : '') + '</div></div>';
+    }).join('') + '</div>' : '<div class="vacio">Sin movimientos registrados.</div>';
+    $$('[data-ver]', m.el).forEach(function (b) { b.onclick = function () { conBoton(b, async function () { const r = await api('verVersion', { id: b.dataset.ver }); verVersion(r); }); }; });
+    $$('[data-res]', m.el).forEach(function (b) {
+      b.onclick = async function () {
+        if (!(await confirmar('Restaurar versión', 'El artículo volverá al contenido de esa versión (se guarda como una versión nueva, no se pierde nada).', 'Restaurar'))) return;
+        conBoton(b, async function () { await api('restaurarVersion', { id: b.dataset.res }); await refrescarCatalogo(); m.cerrar(); toast('Versión restaurada', 'ok'); pintarArticulo($('#vista'), artId); });
+      };
+    });
+  } catch (e) { $('.cuerpo', m.el).innerHTML = '<p>' + esc(e.message) + '</p>'; }
+}
+
+function verVersion(r) {
+  const m = modal({ titulo: 'Versión ' + r.version + ': ' + (r.articulo.titulo || ''), ancho: true, cuerpo: '<div class="cuerpo-art" style="--acc:#49677a">' + renderBloques(r.bloques, { artId: 'v' }) + '</div>' });
+  cargarImagenes(m.el);
+}
+</script>

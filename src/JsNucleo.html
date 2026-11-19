@@ -1,0 +1,272 @@
+<script>
+/* OxoPedia · Núcleo: estado, llamadas al servidor, utilidades, enrutador y estructura (cabecera + barra lateral) */
+'use strict';
+
+const S = { user: null, cfg: null, secciones: [], articulos: [], indice: null, cacheArt: {}, abiertas: new Set(), imgs: {} };
+const $ = function (s, r) { return (r || document).querySelector(s); };
+const $$ = function (s, r) { return Array.from((r || document).querySelectorAll(s)); };
+const esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+const norm = function (s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); };
+const esAdmin = function () { return S.user && S.user.rol === 'Administrador'; };
+
+/** Llamada al servidor (google.script.run) como promesa. */
+function api(accion, payload) {
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function (r) { if (r && r.ok) resolve(r.data); else reject(new Error((r && r.error) || 'Error desconocido')); })
+      .withFailureHandler(function (e) { reject(new Error((e && e.message) || 'No hay conexión con el servidor')); })
+      .api(accion, payload || {});
+  });
+}
+
+/* ── Fechas y textos ── */
+function parseFecha(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}))?/.exec(s || '');
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)) : null;
+}
+function fechaCorta(s) {
+  const d = parseFecha(s);
+  return d ? d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '—';
+}
+function fechaHora(s) {
+  const d = parseFecha(s);
+  return d ? d.toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace('.', '') : '—';
+}
+function diasDesde(s) { const d = parseFecha(s); return d ? Math.floor((Date.now() - d.getTime()) / 86400000) : null; }
+function nombreDe(email) {
+  if (!email) return 'Sin asignar';
+  return String(email).split('@')[0].split(/[._-]+/).map(function (p) { return p ? p.charAt(0).toUpperCase() + p.slice(1) : ''; }).join(' ');
+}
+function claseEstado(e) { return String(e || 'Borrador').replace(/ó/g, 'o').replace(/\s+/g, '-'); }
+function badgeEstado(e) { return '<span class="badge ' + claseEstado(e) + '">' + esc(e || 'Borrador') + '</span>'; }
+function porRevisar(a) {
+  if (a.estado !== 'Validado') return false;
+  const d = diasDesde(a.fecha_revision || a.fecha_creacion);
+  return d !== null && d > S.cfg.dias_para_revisar;
+}
+
+/* ── Catálogo ── */
+function secPorId(id) { return S.secciones.find(function (s) { return s.id === id; }); }
+function secPorSlug(sl) { return S.secciones.find(function (s) { return s.slug === sl; }); }
+function artPorSlug(sl) { return S.articulos.find(function (a) { return a.slug === sl; }); }
+function raices() { return S.secciones.filter(function (s) { return !s.padre_id; }); }
+function hijosDe(id) { return S.secciones.filter(function (s) { return s.padre_id === id; }); }
+function artsDe(secId) { return S.articulos.filter(function (a) { return a.seccion_id === secId; }).sort(function (a, b) { return a.orden - b.orden || a.titulo.localeCompare(b.titulo); }); }
+function artsDeArbol(sec) {
+  let l = artsDe(sec.id);
+  hijosDe(sec.id).forEach(function (h) { l = l.concat(artsDe(h.id)); });
+  return l;
+}
+function raizDe(sec) { return sec && sec.padre_id ? secPorId(sec.padre_id) : sec; }
+function colorDe(secId) { const s = secPorId(secId); return s ? s.color : '#49677a'; }
+function rutaSec(s) { return '#/s/' + encodeURIComponent(s.slug); }
+function rutaArt(a) { return '#/a/' + encodeURIComponent(a.slug); }
+
+async function refrescarCatalogo() {
+  const d = await api('arranque');
+  S.user = d.usuario; S.cfg = d.config; S.secciones = d.secciones; S.articulos = d.articulos;
+  S.indice = null; S.cacheArt = {};
+  pintarNav();
+}
+
+/* ── Avisos y ventanas ── */
+function toast(msg, tipo) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (tipo || '');
+  el.innerHTML = '<i class="ph ph-' + (tipo === 'err' ? 'warning-circle' : tipo === 'ok' ? 'check-circle' : 'info') + '"></i><span>' + esc(msg) + '</span>';
+  $('#toasts').appendChild(el);
+  setTimeout(function () { el.remove(); }, tipo === 'err' ? 7000 : 3500);
+}
+
+/** modal({titulo, cuerpo(HTML), botones:[{txt, clase, onClick(cerrar)}], ancho}) → { el, cerrar } */
+function modal(o) {
+  const velo = document.createElement('div');
+  velo.className = 'velo';
+  velo.innerHTML = '<div class="modal ' + (o.ancho ? 'ancho' : '') + '" role="dialog" aria-modal="true"><header><h2>' + esc(o.titulo) + '</h2><button class="btn-ico" data-x aria-label="Cerrar"><i class="ph ph-x"></i></button></header><div class="cuerpo">' + (o.cuerpo || '') + '</div>' + ((o.botones && o.botones.length) ? '<footer></footer>' : '') + '</div>';
+  const cerrar = function () { velo.remove(); document.removeEventListener('keydown', alEsc); };
+  const alEsc = function (e) { if (e.key === 'Escape') cerrar(); };
+  document.addEventListener('keydown', alEsc);
+  velo.addEventListener('mousedown', function (e) { if (e.target === velo) cerrar(); });
+  $('[data-x]', velo).onclick = cerrar;
+  (o.botones || []).forEach(function (b) {
+    const btn = document.createElement('button');
+    btn.className = 'btn ' + (b.clase || 'btn-s'); btn.textContent = b.txt;
+    btn.onclick = function () { b.onClick ? b.onClick(cerrar, btn) : cerrar(); };
+    $('footer', velo).appendChild(btn);
+  });
+  $('#modales').appendChild(velo);
+  const foco = $('input, select, textarea', velo); if (foco) foco.focus();
+  return { el: velo, cerrar: cerrar };
+}
+
+function confirmar(titulo, mensaje, textoOk, peligro) {
+  return new Promise(function (resolve) {
+    let resuelto = false;
+    const fin = function (v) { if (!resuelto) { resuelto = true; resolve(v); } };
+    const m = modal({ titulo: titulo, cuerpo: '<p>' + esc(mensaje) + '</p>', botones: [
+      { txt: 'Cancelar', onClick: function (c) { fin(false); c(); } },
+      { txt: textoOk || 'Aceptar', clase: peligro ? 'btn-x' : 'btn-p', onClick: function (c) { fin(true); c(); } }] });
+    m.el.addEventListener('mousedown', function (e) { if (e.target === m.el) fin(false); });
+    $('[data-x]', m.el).addEventListener('click', function () { fin(false); });
+  });
+}
+
+/** Ejecuta una acción mostrando «cargando» en el botón y avisando de errores. */
+async function conBoton(btn, fn) {
+  const html = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ph ph-circle-notch girar"></i> Un momento…';
+  try { return await fn(); }
+  catch (e) { toast(e.message, 'err'); }
+  finally { btn.disabled = false; btn.innerHTML = html; }
+}
+
+function copiarTexto(txt) {
+  return new Promise(function (resolve) {
+    const respaldo = function () {
+      const t = document.createElement('textarea'); t.value = txt; t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      t.remove(); resolve(ok);
+    };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(txt).then(function () { resolve(true); }, respaldo);
+    else respaldo();
+  });
+}
+
+function descargarBase64(nombre, mime, base64) {
+  const bin = atob(base64); const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime || 'application/octet-stream' }));
+  const a = document.createElement('a'); a.href = url; a.download = nombre; document.body.appendChild(a); a.click();
+  setTimeout(function () { a.remove(); URL.revokeObjectURL(url); }, 500);
+}
+
+/* ── Enrutador ── */
+function rutaActual() {
+  const h = location.hash.replace(/^#\/?/, '');
+  const partes = h.split('?');
+  return { p: partes[0].split('/').filter(Boolean).map(decodeURIComponent), q: new URLSearchParams(partes[1] || '') };
+}
+let _hashPrevio = location.hash;
+let _ignorarHash = false;
+window.__sucio = false;
+
+window.addEventListener('hashchange', function () {
+  if (_ignorarHash) { _ignorarHash = false; return; }
+  if (window.__sucio && !window.confirm('Tienes cambios sin guardar. ¿Salir de todos modos?')) {
+    _ignorarHash = true; location.hash = _hashPrevio; return;
+  }
+  window.__sucio = false;
+  _hashPrevio = location.hash;
+  navegar();
+});
+window.addEventListener('beforeunload', function (e) { if (window.__sucio) { e.preventDefault(); e.returnValue = ''; } });
+
+function ir(h) { location.hash = h; }
+
+function navegar() {
+  const r = rutaActual();
+  $('#side').classList.remove('abierta');
+  window.scrollTo(0, 0);
+  const v = $('#vista');
+  const o = r.p[0] || '';
+  if (o === '') vistaInicio(v);
+  else if (o === 's') vistaSeccion(v, r.p[1]);
+  else if (o === 'a') vistaArticulo(v, r.p[1]);
+  else if (o === 'buscar') vistaBusqueda(v, r.q.get('q') || '');
+  else if (o === 'nuevo') esAdmin() ? vistaEditor(v, null, r.p[1]) : vistaSinPermiso(v);
+  else if (o === 'editar') esAdmin() ? vistaEditor(v, r.p[1]) : vistaSinPermiso(v);
+  else if (o === 'admin') esAdmin() ? vistaAdmin(v, r.p[1] || 'secciones') : vistaSinPermiso(v);
+  else vistaNoEncontrada(v);
+  pintarNav();
+}
+
+function vistaSinPermiso(v) { v.innerHTML = '<div class="vacio"><i class="ph ph-lock-key"></i><h2>Solo para administradores</h2><p class="suave">No tienes permiso para ver esta página.</p><p><a class="btn btn-p" href="#/">Ir al inicio</a></p></div>'; }
+function vistaNoEncontrada(v) { v.innerHTML = '<div class="vacio"><i class="ph ph-compass"></i><h2>No encontramos esa página</h2><p><a class="btn btn-p" href="#/">Ir al inicio</a></p></div>'; }
+
+/* ── Cabecera ── */
+function pintarCabecera() {
+  const logo = S.cfg.logo_url ? '<img src="' + esc(S.cfg.logo_url) + '" alt="">' : '';
+  $('#marca').innerHTML = logo + '<span>OXO<span class="sub">PEDIA</span></span>';
+  const ini = (S.user.nombre || S.user.email).split(' ').map(function (p) { return p.charAt(0); }).slice(0, 2).join('').toUpperCase();
+  $('#yo').innerHTML = '<div class="avatar">' + esc(ini) + '</div><div class="quien"><b>' + esc(S.user.nombre) + '</b><span>' + esc(S.user.rol) + '</span></div>';
+  const ico = $('#btn-tema i'); ico.className = 'ph ph-' + (document.documentElement.dataset.tema === 'oscuro' ? 'sun' : 'moon');
+}
+
+/* ── Barra lateral ── */
+function secActualId() {
+  const r = rutaActual();
+  if (r.p[0] === 's') { const s = secPorSlug(r.p[1]); return s ? s.id : null; }
+  if (r.p[0] === 'a') { const a = artPorSlug(r.p[1]); return a ? a.seccion_id : null; }
+  if (r.p[0] === 'nuevo') { const s = secPorSlug(r.p[1]); return s ? s.id : null; }
+  return null;
+}
+
+function itemArt(a, c, actSlug) {
+  const p = a.estado === 'Validado' ? 'v' : (a.estado === 'En revisión' ? 'r' : '');
+  return '<a class="nav-art ' + (a.slug === actSlug ? 'act' : '') + '" href="' + rutaArt(a) + '" style="--c:' + c + '"><span class="pt ' + p + '" title="' + esc(a.estado) + '"></span><span>' + esc(a.titulo) + '</span></a>';
+}
+
+function pintarNav() {
+  const r = rutaActual();
+  const actSec = secActualId();
+  const actSlug = r.p[0] === 'a' ? r.p[1] : '';
+  const actRaiz = actSec ? (raizDe(secPorId(actSec)) || {}).id : null;
+  if (actRaiz) S.abiertas = new Set([actRaiz]); // acordeón: solo queda abierta la sección actual
+  let h = '<div class="grupo-t etq">Navegación</div>';
+  h += '<a class="nav-i ' + (r.p.length === 0 ? 'act' : '') + '" href="#/" style="--c:#49677a"><span class="ico"><i class="ph ph-house"></i></span>Inicio</a>';
+  h += '<div class="grupo-t etq" style="margin-top:14px">Secciones</div>';
+  raices().forEach(function (s) {
+    const abierta = S.abiertas.has(s.id);
+    const total = artsDeArbol(s).length;
+    h += '<a class="nav-i ' + (abierta ? 'abierto ' : '') + (actRaiz === s.id && !actSlug ? 'act' : '') + '" href="' + rutaSec(s) + '" data-sec="' + s.id + '" style="--c:' + esc(s.color) + '"><span class="ico"><i class="ph ' + esc(s.icono) + '"></i></span><span>' + esc(s.nombre) + '</span><i class="ph ph-caret-right flecha"></i></a>';
+    if (abierta) {
+      h += '<div class="nav-arts" style="--c:' + esc(s.color) + '">';
+      artsDe(s.id).forEach(function (a) { h += itemArt(a, s.color, actSlug); });
+      hijosDe(s.id).forEach(function (hs) {
+        h += '<div class="nav-sub">' + esc(hs.nombre) + '</div>';
+        artsDe(hs.id).forEach(function (a) { h += itemArt(a, s.color, actSlug); });
+      });
+      if (!total) h += '<div class="peq suave" style="padding:4px 8px">Aún sin artículos</div>';
+      h += '</div>';
+    }
+  });
+  if (esAdmin()) {
+    h += '<div class="grupo-t etq" style="margin-top:18px">Administración</div>';
+    h += '<a class="nav-i" href="#/nuevo" style="--c:#c19528"><span class="ico"><i class="ph ph-plus"></i></span>Nuevo artículo</a>';
+    h += '<a class="nav-i ' + (r.p[0] === 'admin' ? 'act' : '') + '" href="#/admin/secciones" style="--c:#49677a"><span class="ico"><i class="ph ph-gear"></i></span>Gestión</a>';
+  }
+  $('#side').innerHTML = h;
+}
+
+/* ── Arranque ── */
+function pantallaError(msg) {
+  $('#cargando-app').innerHTML = '<div style="max-width:460px;text-align:center;padding:24px;font:500 .95rem Montserrat,Arial;color:#464b4e;letter-spacing:0;text-transform:none"><b style="display:block;font-size:1.2rem;color:#1c1c1c;margin-bottom:8px">No pudimos abrir OxoPedia</b>' + esc(msg) + '<p><button class="btn btn-p" onclick="location.reload()" style="margin-top:16px">Reintentar</button></p></div>';
+}
+
+async function arrancar() {
+  try {
+    const d = await api('arranque');
+    S.user = d.usuario; S.cfg = d.config; S.secciones = d.secciones; S.articulos = d.articulos;
+  } catch (e) { pantallaError(e.message); return; }
+  $('#cargando-app').remove();
+  $('#top').hidden = false; $('#shell').hidden = false;
+  document.title = S.cfg.nombre_app + ' · Conocimiento de TI';
+  pintarCabecera();
+  if (!location.hash && window.RUTA_INICIAL) location.hash = window.RUTA_INICIAL;
+  _hashPrevio = location.hash;
+  navegar();
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  $('#btn-menu').onclick = function () { $('#side').classList.toggle('abierta'); };
+  $('#btn-tema').onclick = function () {
+    const t = document.documentElement.dataset.tema === 'oscuro' ? 'claro' : 'oscuro';
+    document.documentElement.dataset.tema = t;
+    try { localStorage.setItem('oxopedia-tema', t); } catch (e) { /* sin almacenamiento */ }
+    pintarCabecera();
+  };
+  prepararBuscador();
+  arrancar();
+});
+</script>

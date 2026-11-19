@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es" data-tema="claro">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>OxoPedia · Conocimiento de TI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <?!= include_('Estilos') ?>
+  <script>try { document.documentElement.dataset.tema = localStorage.getItem('oxopedia-tema') || 'claro'; } catch (e) { /* tema por defecto */ }</script>
+</head>
+<body>
+  <header class="top" id="top" hidden>
+    <button class="btn-ico" id="btn-menu" aria-label="Abrir menú"><i class="ph ph-list"></i></button>
+    <a class="marca" href="#/" id="marca"><span id="marca-txt">OXO<span class="sub">PEDIA</span></span></a>
+    <div class="buscador" id="buscador">
+      <i class="ph ph-magnifying-glass"></i>
+      <input id="q" type="search" placeholder="Buscar en OxoPedia…" autocomplete="off" aria-label="Buscar">
+      <kbd>/</kbd>
+      <div class="sugerencias" id="sugerencias" hidden></div>
+    </div>
+    <button class="btn-ico" id="btn-tema" aria-label="Cambiar tema" title="Tema claro / oscuro"><i class="ph ph-moon"></i></button>
+    <div class="yo" id="yo"></div>
+  </header>
+
+  <div class="shell" id="shell" hidden>
+    <nav class="side" id="side" aria-label="Secciones"></nav>
+    <main class="main"><div class="pagina" id="vista"></div></main>
+  </div>
+
+  <div id="cargando-app" style="min-height:100vh;display:grid;place-items:center;color:#49677a;font:600 .8rem Montserrat,Arial;letter-spacing:.22em;text-transform:uppercase">
+    Cargando OxoPedia…
+  </div>
+  <div id="modales"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script>window.RUTA_INICIAL = <?!= JSON.stringify(rutaInicial) ?>; window.VERSION = <?!= JSON.stringify(version) ?>;</script>
+  <?!= include_('JsNucleo') ?>
+  <?!= include_('JsRender') ?>
+  <?!= include_('JsVistas') ?>
+  <?!= include_('JsEditor') ?>
+  <?!= include_('JsAdmin') ?>
+</body>
+</html>

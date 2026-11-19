@@ -1,0 +1,275 @@
+<script>
+/* OxoPedia · Editor de artículos por bloques (con vista previa, pasos numerados, imágenes a GitHub y adjuntos a Drive) */
+
+const TIPOS_UI = {
+  titulo: { n: 'Título', i: 'text-h' }, texto: { n: 'Texto', i: 'text-align-left' }, paso: { n: 'Paso', i: 'list-numbers' },
+  imagen: { n: 'Imagen', i: 'image' }, codigo: { n: 'Código', i: 'code' }, alerta: { n: 'Alerta', i: 'warning' },
+  enlace: { n: 'Enlace', i: 'link-simple' }, adjunto: { n: 'Adjunto', i: 'paperclip' }, checklist: { n: 'Checklist', i: 'check-square' },
+  tabla: { n: 'Tabla', i: 'table' }, desplegable: { n: 'Desplegable', i: 'caret-circle-down' }, separador: { n: 'Separador', i: 'minus' }
+};
+const TIPOS_HIJO = ['texto', 'imagen', 'codigo', 'alerta', 'enlace', 'adjunto', 'checklist', 'tabla'];
+const LENGUAJES = ['texto', 'powershell', 'bash', 'cmd', 'javascript', 'json', 'sql', 'html', 'css', 'ini', 'yaml'];
+
+let E = null; // estado del editor: { id, meta, bloques, base, subiendo }
+let _uid = 0;
+
+function nuevoBloque(tipo) {
+  const b = { uid: 'u' + (++_uid), tipo: tipo, contenido: '', config: {}, hijos: [] };
+  if (tipo === 'titulo') b.config.nivel = 2;
+  if (tipo === 'alerta') b.config.nivel = 'nota';
+  if (tipo === 'codigo') b.config.lenguaje = 'texto';
+  if (tipo === 'tabla') b.contenido = 'Columna 1 | Columna 2\nDato | Dato';
+  return b;
+}
+function conUid(lista) { return (lista || []).map(function (b) { return { uid: 'u' + (++_uid), tipo: b.tipo, contenido: b.contenido || '', config: Object.assign({}, b.config || {}), hijos: conUid(b.hijos) }; }); }
+function limpiar(lista) { return lista.map(function (b) { return { tipo: b.tipo, contenido: b.contenido, config: b.config, hijos: limpiar(b.hijos || []) }; }); }
+function instantanea() { return JSON.stringify({ m: E.meta, b: limpiar(E.bloques) }); }
+function marcarSucio() { window.__sucio = instantanea() !== E.base; const s = $('#ed-sucio'); if (s) s.hidden = !window.__sucio; }
+
+/** Busca un bloque (y su lista contenedora) por uid. */
+function hallar(uid, lista) {
+  lista = lista || E.bloques;
+  for (let i = 0; i < lista.length; i++) {
+    if (lista[i].uid === uid) return { lista: lista, i: i, b: lista[i] };
+    const r = hallar(uid, lista[i].hijos || []); if (r) return r;
+  }
+  return null;
+}
+
+async function vistaEditor(v, idOSlugSeccion, slugSeccion) {
+  const id = ++_navId;
+  const r = rutaActual();
+  const esNuevo = r.p[0] === 'nuevo';
+  let meta, bloques = [], artId = null;
+  if (esNuevo) {
+    const sec = secPorSlug(r.p[1]) || raices()[0];
+    meta = { seccion_id: sec ? sec.id : '', titulo: '', resumen: '', etiquetas: '', responsable_email: S.user.email, estado: 'Borrador' };
+    bloques = [nuevoBloque('titulo')]; bloques[0].contenido = 'Objetivo / ¿Qué es?';
+  } else {
+    vistaArtEsqueleto(v);
+    const a0 = S.articulos.find(function (x) { return x.id === r.p[1]; });
+    if (!a0) { vistaNoEncontrada(v); return; }
+    try { const d = await api('articulo', { id: a0.id }); S.cacheArt[a0.id] = d; if (id !== _navId) return;
+      artId = a0.id; meta = { seccion_id: a0.seccion_id, titulo: a0.titulo, resumen: a0.resumen, etiquetas: a0.etiquetas, responsable_email: a0.responsable_email, estado: a0.estado };
+      bloques = conUid(d.bloques);
+    } catch (e) { v.innerHTML = '<div class="vacio"><h2>No se pudo abrir el editor</h2><p>' + esc(e.message) + '</p></div>'; return; }
+  }
+  E = { id: artId, meta: meta, bloques: bloques, base: '', prev: true };
+  E.base = instantanea(); window.__sucio = false;
+  pintarEditor(v);
+}
+
+function opcionesSecciones(sel) {
+  let h = '';
+  raices().forEach(function (s) {
+    h += '<option value="' + s.id + '"' + (s.id === sel ? ' selected' : '') + '>' + esc(s.nombre) + '</option>';
+    hijosDe(s.id).forEach(function (c) { h += '<option value="' + c.id + '"' + (c.id === sel ? ' selected' : '') + '>&nbsp;&nbsp;↳ ' + esc(c.nombre) + '</option>'; });
+  });
+  return h;
+}
+
+function pintarEditor(v) {
+  const sec = secPorId(E.meta.seccion_id) || { color: '#49677a' };
+  v.innerHTML = '<div style="--acc:' + esc(sec.color) + '" id="ed-raiz">' +
+    '<div class="migas"><a href="#/">Inicio</a><i class="ph ph-caret-right"></i><span>' + (E.id ? 'Editar artículo' : 'Nuevo artículo') + '</span></div>' +
+    '<div class="ed-barra"><button class="btn btn-p" id="ed-guardar"><i class="ph ph-floppy-disk"></i> Guardar</button><button class="btn btn-s" id="ed-cancelar">Cancelar</button>' +
+    '<input class="nota" id="ed-nota" maxlength="200" placeholder="¿Qué cambió? (aparece en el historial)"><span class="sucio" id="ed-sucio" hidden>● Cambios sin guardar</span>' +
+    '<button class="btn btn-t" id="ed-prev-btn"><i class="ph ph-columns"></i> Vista previa</button></div>' +
+    '<div class="ed-cols ' + (E.prev ? '' : 'sin-prev') + '" id="ed-cols"><div id="ed-izq"></div><div class="ed-prev"><div class="etq" style="margin-bottom:8px">Vista previa</div><div class="cuerpo-art" id="ed-vista"></div></div></div></div>';
+  pintarEditorIzq();
+  actualizarVista();
+  $('#ed-guardar').onclick = guardarEditor;
+  $('#ed-cancelar').onclick = function () { ir(E.id ? '#/a/' + encodeURIComponent((S.articulos.find(function (a) { return a.id === E.id; }) || {}).slug) : '#/'); };
+  $('#ed-prev-btn').onclick = function () { E.prev = !E.prev; $('#ed-cols').classList.toggle('sin-prev', !E.prev); };
+}
+
+function pintarEditorIzq() {
+  const sel = $('#ed-izq');
+  const m = E.meta;
+  const est = ESTADOS_UI.map(function (e) { return '<option' + (e === m.estado ? ' selected' : '') + '>' + e + '</option>'; }).join('');
+  sel.innerHTML =
+    '<div class="card plana ed-meta" style="border-top-width:3px">' +
+    '<div class="campo"><label>Título</label><input id="m-titulo" maxlength="160" value="' + esc(m.titulo) + '" placeholder="Ej.: Configuración de VPN en FortiClient"></div>' +
+    '<div class="fila dos"><div class="campo"><label>Sección</label><select id="m-seccion">' + opcionesSecciones(m.seccion_id) + '</select></div>' +
+    '<div class="campo"><label>Estado</label><select id="m-estado">' + est + '</select></div></div>' +
+    '<div class="campo"><label>Resumen (aparece en tarjetas y en el buscador)</label><textarea id="m-resumen" rows="2" maxlength="500">' + esc(m.resumen) + '</textarea></div>' +
+    '<div class="fila dos"><div class="campo"><label>Etiquetas (separadas por coma)</label><input id="m-etiquetas" value="' + esc(m.etiquetas) + '" placeholder="vpn, forticlient, conectividad"></div>' +
+    '<div class="campo"><label>Responsable (correo)</label><input id="m-resp" type="email" value="' + esc(m.responsable_email) + '"></div></div></div>' +
+    '<div id="ed-bloques"></div>' + selectorAgregar('raiz');
+  const enlazar = function (id, campo) { const el = $('#' + id); el.addEventListener('input', function () { E.meta[campo] = el.value; marcarSucio(); actualizarVistaDeb(); }); };
+  enlazar('m-titulo', 'titulo'); enlazar('m-resumen', 'resumen'); enlazar('m-etiquetas', 'etiquetas'); enlazar('m-resp', 'responsable_email');
+  $('#m-estado').onchange = function (e) { E.meta.estado = e.target.value; marcarSucio(); };
+  $('#m-seccion').onchange = function (e) { E.meta.seccion_id = e.target.value; const s = secPorId(e.target.value); $('#ed-raiz').style.setProperty('--acc', s ? s.color : '#49677a'); marcarSucio(); };
+  enlazarAgregar(sel, 'raiz');
+  pintarBloques();
+}
+const ESTADOS_UI = ['Borrador', 'En revisión', 'Validado'];
+
+function selectorAgregar(donde) {
+  const tipos = donde === 'raiz' ? Object.keys(TIPOS_UI) : TIPOS_HIJO;
+  return '<div class="add-bl" data-donde="' + donde + '"><span class="lbl">' + (donde === 'raiz' ? 'Agregar bloque' : 'Agregar dentro del paso') + '</span>' +
+    tipos.map(function (t) { return '<button type="button" data-add="' + t + '"><i class="ph ph-' + TIPOS_UI[t].i + '"></i>' + TIPOS_UI[t].n + '</button>'; }).join('') + '</div>';
+}
+function enlazarAgregar(raiz, donde) {
+  $$('.add-bl[data-donde="' + donde + '"] [data-add]', raiz).forEach(function (btn) {
+    btn.onclick = function () {
+      const b = nuevoBloque(btn.dataset.add);
+      if (donde === 'raiz') E.bloques.push(b);
+      else { const h = hallar(donde); if (h) h.b.hijos.push(b); }
+      marcarSucio(); pintarBloques(); actualizarVista();
+      const el = document.querySelector('[data-uid="' + b.uid + '"]'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+  });
+}
+
+function pintarBloques() {
+  const cont = $('#ed-bloques');
+  cont.innerHTML = E.bloques.map(function (b, i) { return htmlBloque(b, E.bloques, i, false); }).join('') || '<div class="vacio card plana">Agrega tu primer bloque con los botones de abajo.</div>';
+  enlazarBloques(cont);
+}
+
+function htmlBloque(b, lista, i, esHijo) {
+  const t = TIPOS_UI[b.tipo]; const c = b.config;
+  let cuerpo = '';
+  switch (b.tipo) {
+    case 'titulo': cuerpo = '<div class="fila dos" style="grid-template-columns:130px 1fr"><div class="campo"><label>Nivel</label><select data-c="nivel"><option value="2"' + (+c.nivel === 2 ? ' selected' : '') + '>Título</option><option value="3"' + (+c.nivel === 3 ? ' selected' : '') + '>Subtítulo</option></select></div><div class="campo"><label>Texto</label><input data-k="contenido" value="' + esc(b.contenido) + '"></div></div>'; break;
+    case 'texto': cuerpo = '<textarea data-k="contenido" rows="5">' + esc(b.contenido) + '</textarea><div class="ayuda">Formato: **negrita**, *cursiva*, `código`, [texto](https://enlace), listas con «- » o «1. ». Marca lo pendiente como [COMPLETAR: qué falta].</div>'; break;
+    case 'paso': cuerpo = '<textarea data-k="contenido" rows="3" placeholder="Describe qué debe hacer la persona en este paso">' + esc(b.contenido) + '</textarea><div data-hijos>' + b.hijos.map(function (h, j) { return htmlBloque(h, b.hijos, j, true); }).join('') + '</div>' + selectorAgregar(b.uid); break;
+    case 'imagen': cuerpo = '<div class="zona-img" data-zona tabindex="0">' + (c.ruta ? '<img data-ruta="' + esc(c.ruta) + '" alt="">Clic, arrastra o pega (Ctrl+V) para reemplazar' : '<i class="ph ph-image" style="font-size:1.8rem"></i><br>Clic, arrastra o <b>pega una captura (Ctrl+V)</b>') + '</div><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-file hidden>' +
+      '<div class="fila dos"><div class="campo"><label>Texto alternativo</label><input data-c="alt" value="' + esc(c.alt || '') + '" placeholder="Describe la imagen"></div><div class="campo"><label>Pie de imagen</label><input data-c="pie" value="' + esc(c.pie || '') + '"></div></div>'; break;
+    case 'codigo': cuerpo = '<div class="campo" style="max-width:220px"><label>Lenguaje</label><select data-c="lenguaje">' + LENGUAJES.map(function (l) { return '<option' + (l === c.lenguaje ? ' selected' : '') + '>' + l + '</option>'; }).join('') + '</select></div><textarea data-k="contenido" rows="5" class="mono" spellcheck="false" style="font-family:var(--mono)">' + esc(b.contenido) + '</textarea>'; break;
+    case 'alerta': cuerpo = '<div class="campo" style="max-width:220px"><label>Tipo</label><select data-c="nivel"><option value="nota"' + (c.nivel === 'nota' ? ' selected' : '') + '>Nota</option><option value="advertencia"' + (c.nivel === 'advertencia' ? ' selected' : '') + '>Advertencia</option><option value="importante"' + (c.nivel === 'importante' ? ' selected' : '') + '>Importante</option></select></div><textarea data-k="contenido" rows="3">' + esc(b.contenido) + '</textarea>'; break;
+    case 'enlace': cuerpo = '<div class="fila dos"><div class="campo"><label>Título</label><input data-c="titulo" value="' + esc(c.titulo || '') + '"></div><div class="campo"><label>URL (https://… o carpeta/archivo de Drive)</label><input data-c="url" value="' + esc(c.url || '') + '" placeholder="https://"></div></div><div class="campo"><label>Descripción (opcional)</label><input data-c="descripcion" value="' + esc(c.descripcion || '') + '"></div>'; break;
+    case 'adjunto': cuerpo = '<div class="zona-img" data-zona tabindex="0">' + (c.recurso_id ? '<i class="ph ph-paperclip"></i> <b>' + esc(c.nombre || 'Archivo') + '</b> (' + tamanoLegible(c.tamano_kb || 0) + ')<br>Clic para reemplazar' : '<i class="ph ph-paperclip" style="font-size:1.8rem"></i><br>Clic o arrastra un archivo (máx. ' + S.cfg.max_upload_mb + ' MB)') + '</div><input type="file" data-file hidden>'; break;
+    case 'checklist': cuerpo = '<textarea data-k="contenido" rows="4" placeholder="Un elemento por línea">' + esc(b.contenido) + '</textarea>'; break;
+    case 'tabla': cuerpo = '<textarea data-k="contenido" rows="5" style="font-family:var(--mono)" spellcheck="false">' + esc(b.contenido) + '</textarea><div class="ayuda">Una fila por línea, columnas separadas por «|». La primera fila es el encabezado.</div>'; break;
+    case 'desplegable': cuerpo = '<div class="campo"><label>Título (visible)</label><input data-c="titulo" value="' + esc(c.titulo || '') + '"></div><textarea data-k="contenido" rows="4">' + esc(b.contenido) + '</textarea>'; break;
+    case 'separador': cuerpo = '<div class="ayuda">Línea divisoria.</div>'; break;
+  }
+  return '<div class="bl ' + (esHijo ? 'hijo' : '') + '" data-uid="' + b.uid + '"><header><span class="tipo"><i class="ph ph-' + t.i + '"></i>' + t.n + '</span>' +
+    '<button class="btn-ico" data-mover="-1" title="Subir" ' + (i === 0 ? 'disabled' : '') + '><i class="ph ph-arrow-up"></i></button>' +
+    '<button class="btn-ico" data-mover="1" title="Bajar" ' + (i === lista.length - 1 ? 'disabled' : '') + '><i class="ph ph-arrow-down"></i></button>' +
+    '<button class="btn-ico" data-dup title="Duplicar"><i class="ph ph-copy"></i></button><button class="btn-ico" data-del title="Eliminar" style="color:var(--red)"><i class="ph ph-trash"></i></button></header><div class="cuerpo">' + cuerpo + '</div></div>';
+}
+
+function enlazarBloques(raiz) {
+  $$('.bl', raiz).forEach(function (el) {
+    if (el.dataset.ok) return; el.dataset.ok = '1';
+    const uid = el.dataset.uid;
+    const h = hallar(uid); if (!h) return;
+    const b = h.b;
+    const propio = function (sel) { return $$(sel, el).filter(function (x) { return x.closest('.bl') === el; }); };
+    propio('[data-k]').forEach(function (inp) { inp.addEventListener('input', function () { b[inp.dataset.k] = inp.value; marcarSucio(); actualizarVistaDeb(); }); });
+    propio('[data-c]').forEach(function (inp) {
+      const al = function () { b.config[inp.dataset.c] = inp.dataset.c === 'nivel' && b.tipo === 'titulo' ? +inp.value : inp.value; marcarSucio(); actualizarVistaDeb(); };
+      inp.addEventListener('input', al); inp.addEventListener('change', al);
+    });
+    propio('[data-mover]').forEach(function (btn) { btn.onclick = function () {
+      const d = +btn.dataset.mover; const j = h.i + d; if (j < 0 || j >= h.lista.length) return;
+      const t = h.lista[h.i]; h.lista[h.i] = h.lista[j]; h.lista[j] = t; marcarSucio(); pintarBloques(); actualizarVista();
+    }; });
+    propio('[data-dup]').forEach(function (btn) { btn.onclick = function () { h.lista.splice(h.i + 1, 0, conUid([limpiar([b])[0]])[0]); marcarSucio(); pintarBloques(); actualizarVista(); }; });
+    propio('[data-del]').forEach(function (btn) { btn.onclick = async function () {
+      if ((b.contenido || b.hijos.length) && !(await confirmar('Eliminar bloque', '¿Eliminar este bloque' + (b.hijos.length ? ' y su contenido' : '') + '?', 'Eliminar', true))) return;
+      h.lista.splice(h.i, 1); marcarSucio(); pintarBloques(); actualizarVista();
+    }; });
+    if (b.tipo === 'paso') enlazarAgregar(el, b.uid);
+    const zona = propio('[data-zona]')[0], file = propio('[data-file]')[0];
+    if (zona && file) {
+      zona.onclick = function () { file.click(); };
+      zona.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); } });
+      file.onchange = function () { if (file.files[0]) subirArchivoBloque(b, file.files[0]); file.value = ''; };
+      ['dragover', 'dragenter'].forEach(function (ev) { zona.addEventListener(ev, function (e) { e.preventDefault(); zona.classList.add('sobre'); }); });
+      ['dragleave', 'drop'].forEach(function (ev) { zona.addEventListener(ev, function () { zona.classList.remove('sobre'); }); });
+      zona.addEventListener('drop', function (e) { e.preventDefault(); if (e.dataTransfer.files[0]) subirArchivoBloque(b, e.dataTransfer.files[0]); });
+    }
+    const im = $('img[data-ruta]', el); if (im && im.closest('.bl') === el) cargarImagenes(el);
+  });
+}
+
+/* ── Vista previa ── */
+let _tp = null;
+function actualizarVistaDeb() { clearTimeout(_tp); _tp = setTimeout(actualizarVista, 250); }
+function actualizarVista() {
+  const cont = $('#ed-vista'); if (!cont) return;
+  const ctx = { artId: E.id || 'nuevo', toc: [] };
+  cont.innerHTML = '<h1 style="font-size:1.5rem;margin-bottom:8px">' + esc(E.meta.titulo || 'Sin título') + '</h1>' + (E.meta.resumen ? '<p class="art-resumen" style="font-size:.95rem">' + esc(E.meta.resumen) + '</p>' : '') + renderBloques(limpiar(E.bloques), ctx);
+  cargarImagenes(cont);
+}
+
+/* ── Imágenes y adjuntos ── */
+function leerBase64(archivo) {
+  return new Promise(function (res, rej) { const r = new FileReader(); r.onload = function () { res(String(r.result).split(',')[1]); }; r.onerror = function () { rej(new Error('No se pudo leer el archivo')); }; r.readAsDataURL(archivo); });
+}
+
+/** Reduce capturas grandes (máx. 1600 px de ancho) y las convierte a WebP para que carguen rápido. */
+async function comprimirImagen(archivo) {
+  if (/image\/(gif|svg)/.test(archivo.type)) return { base64: await leerBase64(archivo), mime: archivo.type, nombre: archivo.name };
+  const url = URL.createObjectURL(archivo);
+  try {
+    const img = await new Promise(function (res, rej) { const i = new Image(); i.onload = function () { res(i); }; i.onerror = function () { rej(new Error('La imagen no es válida')); }; i.src = url; });
+    const max = 1600; const k = Math.min(1, max / img.naturalWidth);
+    const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * k); cv.height = Math.round(img.naturalHeight * k);
+    const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(img, 0, 0, cv.width, cv.height);
+    let mime = 'image/webp'; let data = cv.toDataURL(mime, 0.82);
+    if (data.indexOf('data:image/webp') !== 0) { mime = 'image/jpeg'; data = cv.toDataURL(mime, 0.85); }
+    return { base64: data.split(',')[1], mime: mime, nombre: archivo.name || 'captura' };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function subirArchivoBloque(b, archivo) {
+  const max = S.cfg.max_upload_mb * 1024 * 1024;
+  if (archivo.size > max * 3) { toast('El archivo es demasiado grande (máx. ' + S.cfg.max_upload_mb + ' MB).', 'err'); return; }
+  const aviso = document.createElement('div'); aviso.className = 'toast'; aviso.innerHTML = '<i class="ph ph-circle-notch girar"></i><span>Subiendo ' + esc(archivo.name || 'imagen') + '…</span>'; $('#toasts').appendChild(aviso);
+  try {
+    if (b.tipo === 'imagen') {
+      if (!/^image\//.test(archivo.type)) throw new Error('Elige un archivo de imagen.');
+      const im = await comprimirImagen(archivo);
+      if (im.base64.length * 0.75 > max) throw new Error('La imagen sigue siendo muy grande (máx. ' + S.cfg.max_upload_mb + ' MB).');
+      const r = await api('subirImagen', { articulo_id: E.id || '', nombre: im.nombre, mime: im.mime, base64: im.base64 });
+      S.imgs[r.ruta] = 'data:' + im.mime + ';base64,' + im.base64; // vista inmediata aunque la CDN tarde en propagar
+      b.config.ruta = r.ruta; b.config.recurso_id = r.recurso_id; if (!b.config.alt) b.config.alt = (archivo.name || '').replace(/\.[^.]+$/, '');
+    } else {
+      if (archivo.size > max) throw new Error('El archivo supera ' + S.cfg.max_upload_mb + ' MB.');
+      const r = await api('subirAdjunto', { articulo_id: E.id || '', nombre: archivo.name, mime: archivo.type || 'application/octet-stream', base64: await leerBase64(archivo) });
+      b.config.recurso_id = r.recurso_id; b.config.nombre = r.nombre; b.config.tamano_kb = r.tamano_kb;
+    }
+    marcarSucio(); pintarBloques(); actualizarVista(); toast('Archivo subido', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  finally { aviso.remove(); }
+}
+
+// Pegar capturas con Ctrl+V: se agregan como bloque de imagen (después del bloque en el que estés escribiendo)
+document.addEventListener('paste', function (e) {
+  if (!E || !$('#ed-raiz')) return;
+  const it = Array.from((e.clipboardData || {}).items || []).find(function (x) { return x.kind === 'file' && /^image\//.test(x.type); });
+  if (!it) return;
+  e.preventDefault();
+  const b = nuevoBloque('imagen');
+  const act = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.bl') : null;
+  const h = act ? hallar(act.dataset.uid) : null;
+  if (h) {
+    if (h.b.tipo === 'imagen' && !h.b.config.ruta) { subirArchivoBloque(h.b, it.getAsFile()); return; }
+    if (h.b.tipo === 'paso') h.b.hijos.push(b); else h.lista.splice(h.i + 1, 0, b);
+  } else E.bloques.push(b);
+  pintarBloques(); subirArchivoBloque(b, it.getAsFile());
+});
+
+document.addEventListener('keydown', function (e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && E && $('#ed-raiz')) { e.preventDefault(); guardarEditor(); }
+});
+
+/* ── Guardar ── */
+async function guardarEditor() {
+  const btn = $('#ed-guardar');
+  if (!E.meta.titulo.trim()) { toast('Escribe un título para el artículo.', 'err'); $('#m-titulo').focus(); return; }
+  await conBoton(btn, async function () {
+    const r = await api('guardarArticulo', { articulo: Object.assign({ id: E.id }, E.meta), bloques: limpiar(E.bloques), nota: $('#ed-nota').value });
+    delete S.cacheArt[r.id];
+    await refrescarCatalogo();
+    window.__sucio = false; E.base = instantanea();
+    toast('Guardado (v' + r.version + ')', 'ok');
+    ir('#/a/' + encodeURIComponent(r.slug));
+  });
+}
+</script>
