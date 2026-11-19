@@ -167,6 +167,50 @@ window.addEventListener('hashchange', function () {
 window.addEventListener('beforeunload', function (e) { if (window.__sucio) { e.preventDefault(); e.returnValue = ''; } });
 
 function ir(h) { location.hash = h; }
+
+/* ── URL de la barra de direcciones (?view=<identificador>#<identificador>) ──
+   El enrutador interno sigue usando #/… dentro del iframe; aquí se refleja en la URL real con google.script.history. */
+const _enc = encodeURIComponent;
+function urlDeRuta() {
+  const r = rutaActual(), o = r.p[0] || '';
+  if (o === 's' || o === 'a') return r.p[1] ? { params: { view: r.p[1] }, hash: r.p[1] } : { params: {}, hash: '' };
+  if (o === 'buscar') return { params: r.q.get('q') ? { view: 'buscar', q: r.q.get('q') } : { view: 'buscar' }, hash: 'buscar' };
+  if (o === 'nuevo') return { params: r.p[1] ? { view: 'nuevo', seccion: r.p[1] } : { view: 'nuevo' }, hash: 'nuevo' };
+  if (o === 'editar') return { params: r.p[1] ? { view: 'editar', id: r.p[1] } : { view: 'editar' }, hash: 'editar' };
+  if (o === 'admin') { const v = 'gestion-' + (r.p[1] || 'secciones'); return { params: { view: v }, hash: v }; }
+  return { params: {}, hash: '' };
+}
+/** Parámetros de la URL (valores ya decodificados) → ruta interna. */
+function rutaDeUrl(p) {
+  p = p || {};
+  const v = p.view || '';
+  if (!v) return p.a ? '#/a/' + _enc(p.a) : (p.s ? '#/s/' + _enc(p.s) : '#/');
+  if (v === 'buscar') return '#/buscar?q=' + _enc(p.q || '');
+  if (v === 'nuevo') return '#/nuevo' + (p.seccion ? '/' + _enc(p.seccion) : '');
+  if (v === 'editar') return '#/editar/' + _enc(p.id || '');
+  if (v.indexOf('gestion-') === 0) return '#/admin/' + _enc(v.slice(8));
+  if (secPorSlug(v)) return '#/s/' + _enc(v);
+  return '#/a/' + _enc(v);
+}
+let _urlPrevia = null, _desdeHistorial = false;
+function sincronizarUrl() {
+  const gh = window.google && google.script && google.script.history;
+  if (!gh) return;
+  const u = urlDeRuta(), clave = JSON.stringify(u);
+  if (_desdeHistorial) { _desdeHistorial = false; _urlPrevia = clave; return; } // viene de atrás/adelante: la URL ya es la correcta
+  if (clave === _urlPrevia) return;
+  try { (_urlPrevia === null ? gh.replace : gh.push)(null, u.params, u.hash); _urlPrevia = clave; } catch (e) { /* sin historial */ }
+}
+function engancharHistorial() {
+  const gh = window.google && google.script && google.script.history;
+  if (!gh) return;
+  gh.setChangeHandler(function (ev) {
+    const loc = (ev && ev.location) || {}, p = loc.parameter || {};
+    const plano = {}; Object.keys(p).forEach(function (k) { plano[k] = Array.isArray(p[k]) ? p[k][0] : p[k]; });
+    const ruta = rutaDeUrl(plano), norm = function (h) { return h.replace(/^#\/?/, ''); };
+    if (norm(ruta) !== norm(location.hash)) { _desdeHistorial = true; location.hash = ruta; }
+  });
+}
 function cerrarMenu() { $('#side').classList.remove('abierta'); $('#velo-lat').classList.remove('on'); }
 
 /* Enlaces internos (#/…): se navega por JavaScript para que nunca recarguen el marco de Apps Script (pantalla en blanco). */
@@ -220,6 +264,7 @@ function navegar() {
   else if (o === 'admin') esAdmin() ? vistaAdmin(v, r.p[1] || 'secciones') : vistaSinPermiso(v);
   else vistaNoEncontrada(v);
   pintarNav();
+  sincronizarUrl();
 }
 
 function vistaSinPermiso(v) { v.innerHTML = '<div class="vacio"><i class="ph ph-lock-key"></i><h2>Solo para administradores</h2><p class="suave">No tienes permiso para ver esta página.</p><p><a class="btn btn-p" href="#/">Ir al inicio</a></p></div>'; }
@@ -294,8 +339,13 @@ async function arrancar() {
   } catch (e) { pantallaError(e.message); return; }
   document.title = S.cfg.nombre_app + ' · Conocimiento de TI';
   pintarCabecera();
-  if (!location.hash && window.RUTA_INICIAL) location.hash = window.RUTA_INICIAL;
+  if (!location.hash) {
+    const ini = {}; Object.keys(window.URL_INICIAL || {}).forEach(function (k) { try { ini[k] = decodeURIComponent(window.URL_INICIAL[k]); } catch (e) { /* valor inválido */ } });
+    const ruta = rutaDeUrl(ini);
+    if (ruta !== '#/') location.hash = ruta;
+  }
   _hashPrevio = location.hash;
+  engancharHistorial();
   navegar();
 }
 

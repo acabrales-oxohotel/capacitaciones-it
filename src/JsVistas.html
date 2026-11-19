@@ -259,7 +259,7 @@ function pintarArticulo(v, artId) {
   }
 
   $('#a-copiar', v).onclick = function () {
-    const url = (S.cfg.url_app ? S.cfg.url_app + '?a=' + encodeURIComponent(a.slug) : location.href);
+    const url = (S.cfg.url_app ? S.cfg.url_app + '?view=' + encodeURIComponent(a.slug) + '#' + encodeURIComponent(a.slug) : location.href);
     copiarTexto(url).then(function (ok) { toast(ok ? 'Enlace copiado' : 'No se pudo copiar el enlace', ok ? 'ok' : 'err'); });
   };
   $('#a-imprimir', v).onclick = function () { $$('details.desp').forEach(function (x) { x.open = true; }); window.print(); };

@@ -1,6 +1,7 @@
 /**
  * OxoPedia · Punto de entrada.
- *  - doGet  → sirve la aplicación (acepta ?a=slug-del-articulo o ?s=slug-de-la-seccion para enlaces directos).
+ *  - doGet  → sirve la aplicación. Enlaces directos: ?view=<identificador de sección o artículo>, ?view=gestion-usuarios,
+ *             ?view=buscar&q=…  (también acepta los antiguos ?a=slug y ?s=slug).
  *  - api()  → única función que llama el frontend; valida sesión y rol en cada llamada.
  */
 
@@ -8,7 +9,10 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   const t = HtmlService.createTemplateFromFile('Index');
   t.version = APP.VERSION;
-  t.rutaInicial = p.a ? '#/a/' + encodeURIComponent(p.a) : (p.s ? '#/s/' + encodeURIComponent(p.s) : '');
+  // Parámetros de la URL (?view=…&q=…): se escapan con encodeURIComponent, así no pueden romper el <script> de la plantilla.
+  const ini = {};
+  ['view', 'a', 's', 'q', 'seccion', 'id'].forEach(function (k) { if (p[k]) ini[k] = encodeURIComponent(String(p[k]).slice(0, 200)); });
+  t.paramsInicial = JSON.stringify(ini);
   const salida = t.evaluate()
     .setTitle(APP.NOMBRE + ' · Conocimiento de TI')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
